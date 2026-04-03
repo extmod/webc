@@ -5,14 +5,12 @@ export default async function handler(req, res) {
 
   if (req.method === "OPTIONS") { res.status(200).end(); return; }
 
-  // Support both ?url= and combined query (Google appends &q=... etc)
   let rawUrl = req.query.url || "";
   if (!rawUrl) { res.status(400).json({ error: "Missing url" }); return; }
 
   let targetUrl;
   try {
     targetUrl = decodeURIComponent(rawUrl);
-    // If extra query params were appended after url=..., rebuild them
     const extra = { ...req.query };
     delete extra.url;
     if (Object.keys(extra).length > 0) {
@@ -20,7 +18,7 @@ export default async function handler(req, res) {
       for (const [k, v] of Object.entries(extra)) u.searchParams.set(k, v);
       targetUrl = u.toString();
     }
-    new URL(targetUrl); // validate
+    new URL(targetUrl);
   } catch {
     res.status(400).json({ error: "Invalid URL" }); return;
   }
@@ -28,7 +26,6 @@ export default async function handler(req, res) {
   try {
     const targetOrigin = new URL(targetUrl).origin;
 
-    // Read body for POST
     let body = undefined;
     if (!["GET","HEAD"].includes(req.method)) {
       body = await new Promise((resolve) => {
@@ -52,7 +49,6 @@ export default async function handler(req, res) {
       redirect: "manual",
     });
 
-    // Handle redirects lewat proxy
     if ([301,302,303,307,308].includes(fetchRes.status)) {
       let loc = fetchRes.headers.get("location") || "";
       if (loc) {
@@ -86,14 +82,22 @@ export default async function handler(req, res) {
 
       function px(u) {
         if (!u) return u;
-        if (/^(data:|javascript:|#|mailto:|tel:)/.test(u)) return u;
-        if (u.startsWith("//")) u = "https:" + u;
-        else if (u.startsWith("/")) u = base + u;
-        else if (!u.startsWith("http")) { try { u = new URL(u, orig).href; } catch { return u; } }
-        return `/api/proxy?url=${encodeURIComponent(u)}`;
+        if (/^(data:|javascript:|#|mailto:|tel:|blob:)/.test(u)) return u;
+        if (u.startsWith("/api/proxy")) return u;
+        try {
+          if (u.startsWith("//")) u = "https:" + u;
+          else if (u.startsWith("/")) u = base + u;
+          else if (!u.startsWith("http")) u = new URL(u, orig).href;
+          return `/api/proxy?url=${encodeURIComponent(u)}`;
+        } catch { return u; }
       }
 
-      html = html.replace(/(\b(?:href|src|action)\s*=\s*)(['"])(.*?)\2/gi, (_, a, q, v) => `${a}${q}${px(v)}${q}`);
+      html = html.replace(/(\b(?:href|src|action)\s*=\s*)(['"])(.*?)\2/gi,
+        (_, a, q, v) => `${a}${q}${px(v)}${q}`);
+      html = html.replace(/\bsrcset\s*=\s*(['"])(.*?)\1/gi, (_, q, val) => {
+        const rewritten = val.replace(/(\S+)(\s*(?:\s+\d+[wx])?)/g, (m, url, rest) => px(url) + rest);
+        return `srcset=${q}${rewritten}${q}`;
+      });
       html = html.replace(/\s*integrity\s*=\s*["'][^"']*["']/gi, "");
       html = html.replace(/\s*crossorigin\s*=\s*["'][^"']*["']/gi, "");
       html = html.replace(/<base[^>]*>/gi, "");
@@ -101,40 +105,90 @@ export default async function handler(req, res) {
       const script = `<script>
 (function(){
 var P='/api/proxy?url=',B='${base}',O='${orig}';
+
 function px(u){
-  if(!u||/^(data:|javascript:|#|mailto:|tel:)/.test(u)||u.startsWith(P))return u;
-  if(u.startsWith('//'))u='https:'+u;
-  else if(u.startsWith('/'))u=B+u;
-  else if(!u.startsWith('http'))try{u=new URL(u,O).href}catch(e){return u}
-  return P+encodeURIComponent(u);
+  if(!u||/^(data:|javascript:|#|mailto:|tel:|blob:)/.test(u))return u;
+  if(u.startsWith(P))return u;
+  try{
+    if(u.startsWith('//'))u='https:'+u;
+    else if(u.startsWith('/'))u=B+u;
+    else if(!u.startsWith('http'))u=new URL(u,O).href;
+    return P+encodeURIComponent(u);
+  }catch(e){return u;}
 }
-// Intercept fetch
+
+function notify(u){try{parent.postMessage({t:'nav',u:u},'*');}catch(e){}}
+
 var oF=window.fetch;
 window.fetch=function(inp,ini){
-  var u=typeof inp==='string'?inp:(inp&&inp.url);
-  if(u&&!u.startsWith(P)&&(u.startsWith('http')||u.startsWith('//')))return oF(px(u),ini);
+  var u=typeof inp==='string'?inp:(inp&&inp.url||'');
+  if(u&&!u.startsWith(P)&&(u.startsWith('http')||u.startsWith('//')))
+    return oF(px(u),ini);
   return oF(inp,ini);
 };
-// Intercept XHR
+
 var oO=XMLHttpRequest.prototype.open;
 XMLHttpRequest.prototype.open=function(m,u){
   if(u&&!u.startsWith(P)&&(u.startsWith('http')||u.startsWith('//')))u=px(u);
   return oO.apply(this,[m,u].concat(Array.prototype.slice.call(arguments,2)));
 };
-// Intercept form submit
-document.addEventListener('submit',function(e){
-  var f=e.target,action=f.action||'';
-  if(!action||action.startsWith(P))return;
+
+try{
+  var oPS=history.pushState.bind(history);
+  var oRS=history.replaceState.bind(history);
+  history.pushState=function(s,t,u){
+    if(u){try{notify(u.startsWith('http')?u:new URL(u,O).href);}catch(e){}}
+    return oPS(s,t,u);
+  };
+  history.replaceState=function(s,t,u){
+    if(u){try{notify(u.startsWith('http')?u:new URL(u,O).href);}catch(e){}}
+    return oRS(s,t,u);
+  };
+}catch(e){}
+
+document.addEventListener('click',function(e){
+  var el=e.target;
+  while(el&&el.tagName!=='A')el=el.parentElement;
+  if(!el)return;
+  var href=el.getAttribute('href');
+  if(!href||/^(javascript:|#|mailto:|tel:)/.test(href))return;
   e.preventDefault();
-  var params=new URLSearchParams(new FormData(f)).toString();
-  var sep=action.includes('?')?'&':'?';
-  var full=action+(params?sep+params:'');
-  var proxied=P+encodeURIComponent(full);
-  try{parent.postMessage({t:'nav',u:full},'*')}catch(ex){}
-  window.location.href=proxied;
+  e.stopPropagation();
+  var abs;
+  try{
+    if(href.startsWith('//'))abs='https:'+href;
+    else if(href.startsWith('/'))abs=B+href;
+    else if(href.startsWith('http'))abs=href;
+    else abs=new URL(href,O).href;
+  }catch(ex){return;}
+  notify(abs);
+  window.location.href=P+encodeURIComponent(abs);
 },true);
-// Tell parent current URL
-window.addEventListener('load',function(){try{parent.postMessage({t:'nav',u:O},'*')}catch(e){}});
+
+document.addEventListener('submit',function(e){
+  var f=e.target;
+  var action=f.action||O;
+  if(action.startsWith(P))return;
+  e.preventDefault();
+  e.stopPropagation();
+  var params=new URLSearchParams(new FormData(f)).toString();
+  var abs;
+  try{
+    if(action.startsWith('//'))abs='https:'+action;
+    else if(action.startsWith('/'))abs=B+action;
+    else if(action.startsWith('http'))abs=action;
+    else abs=new URL(action,O).href;
+  }catch(ex){abs=O;}
+  if(params){var sep=abs.includes('?')?'&':'?';abs=abs+sep+params;}
+  notify(abs);
+  window.location.href=P+encodeURIComponent(abs);
+},true);
+
+window.addEventListener('popstate',function(){
+  try{var cur=location.href;if(cur&&!cur.startsWith(P))notify(cur);}catch(e){}
+});
+
+notify(O);
 })();
 <\/script>`;
 
