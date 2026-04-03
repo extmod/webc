@@ -11,13 +11,6 @@ export default async function handler(req, res) {
   let targetUrl;
   try {
     targetUrl = decodeURIComponent(rawUrl);
-    const extra = { ...req.query };
-    delete extra.url;
-    if (Object.keys(extra).length > 0) {
-      const u = new URL(targetUrl);
-      for (const [k, v] of Object.entries(extra)) u.searchParams.set(k, v);
-      targetUrl = u.toString();
-    }
     new URL(targetUrl);
   } catch {
     res.status(400).json({ error: "Invalid URL" }); return;
@@ -95,16 +88,22 @@ export default async function handler(req, res) {
       html = html.replace(/(\b(?:href|src|action)\s*=\s*)(['"])(.*?)\2/gi,
         (_, a, q, v) => `${a}${q}${px(v)}${q}`);
       html = html.replace(/\bsrcset\s*=\s*(['"])(.*?)\1/gi, (_, q, val) => {
-        const rewritten = val.replace(/(\S+)(\s*(?:\s+\d+[wx])?)/g, (m, url, rest) => px(url) + rest);
+        const rewritten = val.replace(/(\S+)(\s*(?:\s+\d+[wx])?)/g, (m, u, rest) => px(u) + rest);
         return `srcset=${q}${rewritten}${q}`;
       });
       html = html.replace(/\s*integrity\s*=\s*["'][^"']*["']/gi, "");
       html = html.replace(/\s*crossorigin\s*=\s*["'][^"']*["']/gi, "");
       html = html.replace(/<base[^>]*>/gi, "");
 
+      // ORIG_URL disimpan di meta tag — dibaca JS tanpa hardcode di dalam string JS
+      const metaOrig = `<meta name="x-proxy-orig" content="${orig.replace(/"/g,'&quot;')}">`;
+      const metaBase = `<meta name="x-proxy-base" content="${base.replace(/"/g,'&quot;')}">`;
+
       const script = `<script>
 (function(){
-var P='/api/proxy?url=',B='${base}',O='${orig}';
+var P='/api/proxy?url=';
+var O=document.querySelector('meta[name="x-proxy-orig"]').content;
+var B=document.querySelector('meta[name="x-proxy-base"]').content;
 
 function px(u){
   if(!u||/^(data:|javascript:|#|mailto:|tel:|blob:)/.test(u))return u;
@@ -117,7 +116,13 @@ function px(u){
   }catch(e){return u;}
 }
 
-function notify(u){try{parent.postMessage({t:'nav',u:u},'*');}catch(e){}}
+function notify(u){
+  if(!u||u.startsWith(P))return;
+  try{parent.postMessage({t:'nav',u:u},'*');}catch(e){}
+}
+
+// Notify parent — gunakan O dari meta, bukan hardcode
+notify(O);
 
 var oF=window.fetch;
 window.fetch=function(inp,ini){
@@ -137,11 +142,11 @@ try{
   var oPS=history.pushState.bind(history);
   var oRS=history.replaceState.bind(history);
   history.pushState=function(s,t,u){
-    if(u){try{notify(u.startsWith('http')?u:new URL(u,O).href);}catch(e){}}
+    if(u)try{notify(u.startsWith('http')?u:new URL(u,O).href);}catch(e){}
     return oPS(s,t,u);
   };
   history.replaceState=function(s,t,u){
-    if(u){try{notify(u.startsWith('http')?u:new URL(u,O).href);}catch(e){}}
+    if(u)try{notify(u.startsWith('http')?u:new URL(u,O).href);}catch(e){}
     return oRS(s,t,u);
   };
 }catch(e){}
@@ -185,22 +190,19 @@ document.addEventListener('submit',function(e){
 },true);
 
 window.addEventListener('popstate',function(){
-  try{var cur=location.href;if(cur&&!cur.startsWith(P))notify(cur);}catch(e){}
+  try{
+    var cur=location.href;
+    if(cur&&cur.includes(P)){
+      cur=decodeURIComponent(cur.split(P)[1]);
+    }
+    notify(cur);
+  }catch(e){}
 });
 
-// Notify dengan URL yang benar — baca dari iframe location, bukan O yang hardcoded
-window.addEventListener('load',function(){
-  var src='';
-  try{src=window.location.href;}catch(e){}
-  if(src&&src.includes('/api/proxy?url=')){
-    try{notify(decodeURIComponent(src.split('/api/proxy?url=')[1]));}catch(e){notify(O);}
-  } else {
-    notify(O);
-  }
-});
+})();
 <\/script>`;
 
-      html = html.replace(/<head([^>]*)>/i, `<head$1>${script}`);
+      html = html.replace(/<head([^>]*)>/i, `<head$1>${metaOrig}${metaBase}${script}`);
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.status(status).send(html);
     } else {
