@@ -17,14 +17,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const parsedTarget = new URL(targetUrl);
-    const targetOrigin = parsedTarget.origin;
-    // base adalah direktori dari URL aktif — penting untuk relative URL tanpa slash
-    const targetBase = targetUrl.endsWith("/")
-      ? targetUrl
-      : targetUrl.substring(0, targetUrl.lastIndexOf("/") + 1);
-
-    // HOST absolut Vercel — agar redirect tidak nyasar ke domain situs tujuan
+    // HOST absolut Vercel — agar semua URL proxy tidak nyasar ke domain situs tujuan
     const HOST = `https://${req.headers.host}`;
     const PROXY_BASE = `${HOST}/api/proxy?url=`;
 
@@ -37,32 +30,53 @@ export default async function handler(req, res) {
       });
     }
 
-    const fetchRes = await fetch(targetUrl, {
-      method: req.method,
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "identity",
-        "Referer": targetOrigin,
-        ...(body ? { "Content-Type": req.headers["content-type"] || "application/x-www-form-urlencoded" } : {}),
-      },
-      body,
-      redirect: "manual",
-    });
+    // ── Follow redirect secara manual (loop) ──────────────────────────────
+    // Vercel runtime kadang tidak support redirect:"manual" dengan benar,
+    // sehingga redirect di-follow langsung tanpa lewat kode kita.
+    // Solusi: kita follow sendiri sampai dapat response non-redirect.
+    let fetchRes;
+    let currentUrl = targetUrl;
+    let currentMethod = req.method;
+    let currentBody = body;
+    const MAX_REDIRECTS = 8;
 
-    // Handle redirect
-    if ([301, 302, 303, 307, 308].includes(fetchRes.status)) {
-      let loc = fetchRes.headers.get("location") || "";
-      if (loc) {
+    for (let i = 0; i <= MAX_REDIRECTS; i++) {
+      const parsedCurrent = new URL(currentUrl);
+      fetchRes = await fetch(currentUrl, {
+        method: currentMethod,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36",
+          "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9",
+          "Accept-Encoding": "identity",
+          "Referer": parsedCurrent.origin,
+          ...(currentBody ? { "Content-Type": req.headers["content-type"] || "application/x-www-form-urlencoded" } : {}),
+        },
+        body: currentBody,
+        redirect: "manual",
+      });
+
+      if ([301, 302, 303, 307, 308].includes(fetchRes.status)) {
+        let loc = fetchRes.headers.get("location") || "";
+        if (!loc) break;
+        // Resolve URL redirect ke absolute
         if (loc.startsWith("//")) loc = "https:" + loc;
-        else if (loc.startsWith("/")) loc = targetOrigin + loc;
-        else if (!loc.startsWith("http")) loc = new URL(loc, targetUrl).href;
-        res.setHeader("Location", `${PROXY_BASE}${encodeURIComponent(loc)}`);
-        res.status(302).end();
-        return;
+        else if (loc.startsWith("/")) loc = parsedCurrent.origin + loc;
+        else if (!loc.startsWith("http")) loc = new URL(loc, currentUrl).href;
+        // 303 ubah ke GET
+        if (fetchRes.status === 303) { currentMethod = "GET"; currentBody = undefined; }
+        currentUrl = loc;
+        continue;
       }
+      break; // bukan redirect, selesai
     }
+
+    // currentUrl sekarang adalah URL final setelah semua redirect
+    const parsedFinal = new URL(currentUrl);
+    const finalOrigin = parsedFinal.origin;
+    const finalBase = currentUrl.endsWith("/")
+      ? currentUrl
+      : currentUrl.substring(0, currentUrl.lastIndexOf("/") + 1);
 
     const ct = fetchRes.headers.get("content-type") || "";
     const isHtml = ct.includes("text/html");
@@ -81,7 +95,7 @@ export default async function handler(req, res) {
 
     const status = (fetchRes.status >= 200 && fetchRes.status <= 599) ? fetchRes.status : 200;
 
-    // ─── Fungsi rewrite URL ────────────────────────────────────────────────
+    // ── Fungsi rewrite URL ────────────────────────────────────────────────
     function px(u) {
       if (!u || typeof u !== "string") return u;
       u = u.trim();
@@ -89,28 +103,26 @@ export default async function handler(req, res) {
       if (u.startsWith(PROXY_BASE) || u.includes("/api/proxy?url=")) return u;
       try {
         if (u.startsWith("//")) u = "https:" + u;
-        else if (u.startsWith("/")) u = targetOrigin + u;
-        else if (!u.startsWith("http")) u = new URL(u, targetBase).href;
+        else if (u.startsWith("/")) u = finalOrigin + u;
+        else if (!u.startsWith("http")) u = new URL(u, finalBase).href;
         return `${PROXY_BASE}${encodeURIComponent(u)}`;
       } catch {
         return u;
       }
     }
 
-    // ─── Rewrite CSS content ───────────────────────────────────────────────
+    // ── Rewrite CSS content ───────────────────────────────────────────────
     function rewriteCss(css) {
-      // url('...') dan url("...") dan url(...)
       return css.replace(/url\(\s*(['"]?)(.*?)\1\s*\)/gi, (_, q, u) => {
-        const rewritten = px(u);
-        return `url(${q}${rewritten}${q})`;
+        return `url(${q}${px(u)}${q})`;
       });
     }
 
-    // ─── Proses HTML ───────────────────────────────────────────────────────
+    // ── Proses HTML ───────────────────────────────────────────────────────
     if (isHtml) {
       let html = await fetchRes.text();
 
-      // 1. Rewrite atribut href, src, action, data-src, data-href, poster
+      // 1. Rewrite href, src, action, data-src, data-href, poster, dll
       html = html.replace(
         /(\b(?:href|src|action|data-src|data-href|data-lazy|data-original|data-url|poster)\s*=\s*)(['"])(.*?)\2/gi,
         (_, attr, q, v) => `${attr}${q}${px(v)}${q}`
@@ -124,7 +136,7 @@ export default async function handler(req, res) {
         return `srcset=${q}${rewritten}${q}`;
       });
 
-      // 3. Rewrite CSS dalam tag <style>
+      // 3. Rewrite CSS dalam <style>
       html = html.replace(/(<style[^>]*>)([\s\S]*?)(<\/style>)/gi, (_, open, css, close) => {
         return open + rewriteCss(css) + close;
       });
@@ -146,14 +158,14 @@ export default async function handler(req, res) {
       html = html.replace(/<base[^>]*>/gi, "");
 
       // 7. Inject script interceptor
-      const safeOrig = JSON.stringify(targetUrl);
-      const safeBase = JSON.stringify(targetBase);
-      const safeOrigin = JSON.stringify(targetOrigin);
-      const safeProxyBase = JSON.stringify(PROXY_BASE);
+      const safeOrig   = JSON.stringify(currentUrl);
+      const safeBase   = JSON.stringify(finalBase);
+      const safeOrigin = JSON.stringify(finalOrigin);
+      const safeProxy  = JSON.stringify(PROXY_BASE);
 
       const script = `<script>
 (function(){
-var PROXY=${safeProxyBase};
+var PROXY=${safeProxy};
 var ORIG=${safeOrig};
 var BASE=${safeBase};
 var ORIGIN=${safeOrigin};
@@ -175,22 +187,16 @@ function px(u){
   return PROXY+encodeURIComponent(abs(u));
 }
 
-function goto(u){
-  try{parent.postMessage({t:'goto',u:u},'*');}catch(e){}
-}
-function notify(u){
-  try{parent.postMessage({t:'nav',u:u},'*');}catch(e){}
-}
+function goto(u){try{parent.postMessage({t:'goto',u:u},'*');}catch(e){}}
+function notify(u){try{parent.postMessage({t:'nav',u:u},'*');}catch(e){}}
 
 // Intercept fetch
 var oFetch=window.fetch;
 window.fetch=function(inp,ini){
   var u=typeof inp==='string'?inp:(inp&&inp.url||String(inp));
   if(u&&!u.includes('/api/proxy?url=')&&(u.startsWith('http')||u.startsWith('//')||u.startsWith('/'))){
-    var proxied=PROXY+encodeURIComponent(abs(u));
-    if(typeof inp==='string') return oFetch(proxied,ini);
-    var newReq=new Request(proxied,inp);
-    return oFetch(newReq,ini);
+    var p=PROXY+encodeURIComponent(abs(u));
+    return oFetch(typeof inp==='string'?p:new Request(p,inp),ini);
   }
   return oFetch(inp,ini);
 };
@@ -227,38 +233,30 @@ document.addEventListener('submit',function(e){
   var method=(f.method||'get').toUpperCase();
   var a=abs(action);
   if(method==='GET'){
-    var params=new URLSearchParams(new FormData(f)).toString();
-    if(params){var sep=a.includes('?')?'&':'?';a+=sep+params;}
+    var p=new URLSearchParams(new FormData(f)).toString();
+    if(p){a+=a.includes('?')?'&'+p:'?'+p;}
     goto(a);
-  } else {
-    var formData=new URLSearchParams(new FormData(f)).toString();
-    try{parent.postMessage({t:'post',u:a,d:formData},'*');}catch(ex){}
+  }else{
+    try{parent.postMessage({t:'post',u:a,d:new URLSearchParams(new FormData(f)).toString()},'*');}catch(ex){}
   }
 },true);
 
-// Intercept pushState / replaceState
+// Intercept pushState/replaceState
 try{
   var oPS=history.pushState.bind(history);
   var oRS=history.replaceState.bind(history);
-  history.pushState=function(s,t,u){
-    if(u){var a=abs(String(u));notify(a);return oPS(s,t,u);}
-    return oPS(s,t,u);
-  };
-  history.replaceState=function(s,t,u){
-    if(u){var a=abs(String(u));notify(a);return oRS(s,t,u);}
-    return oRS(s,t,u);
-  };
+  history.pushState=function(s,t,u){if(u){notify(abs(String(u)));} return oPS(s,t,u);};
+  history.replaceState=function(s,t,u){if(u){notify(abs(String(u)));} return oRS(s,t,u);};
 }catch(e){}
 
-// Monitor location.href changes (SPA)
-var _lastHref=location.href;
+// Monitor location changes (SPA)
+var _last=location.href;
 setInterval(function(){
   var cur=location.href;
-  if(cur!==_lastHref){
-    _lastHref=cur;
-    if(!cur.includes('/api/proxy?url=')&&(cur.startsWith('http')||cur.startsWith('/'))){
+  if(cur!==_last){
+    _last=cur;
+    if(!cur.includes('/api/proxy?url=')&&(cur.startsWith('http')||cur.startsWith('/')))
       notify(abs(cur));
-    }
   }
 },500);
 
@@ -270,14 +268,13 @@ notify(ORIG);
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.status(status).send(html);
 
-    // ─── Proses CSS ──────────────────────────────────────────────────────
+    // ── Proses CSS ────────────────────────────────────────────────────────
     } else if (isCss) {
       let css = await fetchRes.text();
-      css = rewriteCss(css);
       res.setHeader("Content-Type", "text/css; charset=utf-8");
-      res.status(status).send(css);
+      res.status(status).send(rewriteCss(css));
 
-    // ─── Binary / lainnya ────────────────────────────────────────────────
+    // ── Binary / lainnya ──────────────────────────────────────────────────
     } else {
       const buf = Buffer.from(await fetchRes.arrayBuffer());
       res.status(status).send(buf);
