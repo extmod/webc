@@ -1,328 +1,417 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Browser</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-      background: #1a1a2e;
-      color: #eee;
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-    #toolbar {
-      display: flex;
-      flex-direction: column;
-      background: #16213e;
-      border-bottom: 1px solid #0f3460;
-      flex-shrink: 0;
-      padding: 8px 10px;
-      gap: 6px;
-    }
-    #toolbar-nav {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-    #toolbar-search {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .nav-btn {
-      background: none;
-      border: none;
-      color: #aaa;
-      font-size: 16px;
-      cursor: pointer;
-      padding: 5px 8px;
-      border-radius: 6px;
-      flex-shrink: 0;
-    }
-    .nav-btn:hover { background: #0f3460; color: #fff; }
-    .nav-btn:disabled { color: #333; cursor: default; }
-    #url-bar {
-      flex: 1;
-      min-width: 0;
-      background: #0f3460;
-      border: 1px solid #1a4a8a;
-      border-radius: 20px;
-      color: #fff;
-      font-size: 14px;
-      padding: 8px 14px;
-      outline: none;
-    }
-    #url-bar:focus { border-color: #4a9eff; }
-    #url-bar::placeholder { color: #555; font-size: 13px; }
-    #go-btn {
-      background: #4a9eff;
-      border: none;
-      border-radius: 20px;
-      color: #fff;
-      font-size: 13px;
-      font-weight: 600;
-      padding: 8px 16px;
-      cursor: pointer;
-      flex-shrink: 0;
-    }
-    #status-bar {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 3px 12px;
-      background: #12192e;
-      font-size: 11px;
-      color: #445;
-      flex-shrink: 0;
-    }
-    #sdot {
-      width: 6px; height: 6px;
-      border-radius: 50%;
-      background: #333;
-      flex-shrink: 0;
-    }
-    #sdot.ok { background: #4caf50; }
-    #sdot.loading { background: #f5a623; animation: pulse 1s infinite; }
-    #sdot.error { background: #f44336; }
-    @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.3} }
-    #frame-wrap {
-      flex: 1;
-      position: relative;
-      overflow: hidden;
-    }
-    #browser-frame {
-      width: 100%; height: 100%;
-      border: none;
-      background: #fff;
-      display: none;
-    }
-    #home {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100%;
-      gap: 20px;
-      padding: 20px;
-    }
-    #home h1 { font-size: 26px; color: #4a9eff; }
-    .ql-wrap {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      justify-content: center;
-      max-width: 360px;
-    }
-    .ql {
-      background: #16213e;
-      border: 1px solid #0f3460;
-      border-radius: 12px;
-      padding: 10px 14px;
-      cursor: pointer;
-      font-size: 12px;
-      color: #aaa;
-      text-align: center;
-      min-width: 70px;
-    }
-    .ql span { display: block; font-size: 20px; margin-bottom: 3px; }
-    .ql:hover { border-color: #4a9eff; color: #fff; }
-    #badge {
-      display: flex; align-items: center; gap: 6px;
-      background: #0d2a1a; border: 1px solid #1a5c30;
-      border-radius: 20px; padding: 7px 14px;
-      font-size: 12px; color: #4caf50;
-    }
-    #loading {
-      display: none;
-      position: absolute; inset: 0;
-      background: #1a1a2ecc;
-      align-items: center; justify-content: center;
-      flex-direction: column; gap: 12px; z-index: 10;
-    }
-    #loading.show { display: flex; }
-    .spin {
-      width: 36px; height: 36px;
-      border: 3px solid #0f3460;
-      border-top-color: #4a9eff;
-      border-radius: 50%;
-      animation: spin .8s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Browser</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0e0e0f;
+    --surface: #161618;
+    --border: #2a2a2e;
+    --accent: #c8ff00;
+    --accent2: #00d4ff;
+    --text: #e8e8e8;
+    --muted: #666;
+    --bar-h: 52px;
+  }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    overflow: hidden;
+  }
+
+  /* ── Top Bar ── */
+  #bar {
+    height: var(--bar-h);
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+    position: relative;
+    z-index: 10;
+  }
+
+  /* Nav buttons */
+  .nav-btn {
+    width: 32px; height: 32px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px;
+    transition: all .15s;
+    flex-shrink: 0;
+  }
+  .nav-btn:hover:not(:disabled) { background: var(--border); color: var(--text); }
+  .nav-btn:disabled { opacity: .3; cursor: default; }
+
+  /* URL bar */
+  #url-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0 12px;
+    gap: 8px;
+    height: 36px;
+    transition: border-color .2s;
+  }
+  #url-wrap:focus-within { border-color: var(--accent); }
+
+  #lock {
+    font-size: 11px;
+    color: var(--muted);
+    flex-shrink: 0;
+  }
+  #lock.secure { color: #4caf50; }
+
+  #url {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    min-width: 0;
+  }
+  #url::placeholder { color: var(--muted); }
+
+  #go-btn {
+    width: 28px; height: 28px;
+    border: none;
+    background: var(--accent);
+    color: #000;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    display: flex; align-items: center; justify-content: center;
+    transition: all .15s;
+    flex-shrink: 0;
+  }
+  #go-btn:hover { background: #d4ff1a; transform: scale(1.05); }
+
+  /* Loading bar */
+  #progress {
+    position: absolute;
+    bottom: 0; left: 0;
+    height: 2px;
+    width: 0%;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    transition: width .3s ease;
+    border-radius: 0 2px 2px 0;
+  }
+  #progress.done { opacity: 0; transition: opacity .4s .2s; }
+
+  /* ── Iframe ── */
+  #frame-wrap {
+    position: relative;
+    height: calc(100vh - var(--bar-h));
+  }
+
+  iframe {
+    width: 100%; height: 100%;
+    border: none;
+    background: #fff;
+    display: block;
+  }
+
+  /* ── Loading overlay ── */
+  #overlay {
+    position: absolute;
+    inset: 0;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .2s;
+    z-index: 5;
+  }
+  #overlay.show { opacity: 1; pointer-events: all; }
+
+  .spinner {
+    width: 36px; height: 36px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .load-text {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: .05em;
+  }
+
+  /* ── Home screen ── */
+  #home {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 32px;
+    z-index: 4;
+    background: var(--bg);
+  }
+  #home.hidden { display: none; }
+
+  .home-logo {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 42px;
+    letter-spacing: -.02em;
+    color: var(--text);
+  }
+  .home-logo span { color: var(--accent); }
+
+  .home-sub {
+    font-size: 13px;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+  }
+
+  .quick-links {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 400px;
+  }
+
+  .ql {
+    padding: 8px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all .15s;
+    font-family: 'DM Mono', monospace;
+  }
+  .ql:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(200,255,0,.05);
+  }
+</style>
 </head>
 <body>
 
-<div id="toolbar">
-  <div id="toolbar-nav">
-    <button class="nav-btn" id="btn-back" disabled>&#8592;</button>
-    <button class="nav-btn" id="btn-fwd" disabled>&#8594;</button>
-    <button class="nav-btn" id="btn-reload">&#8635;</button>
-    <button class="nav-btn" id="btn-home">&#8962;</button>
-  </div>
-  <div id="toolbar-search">
-    <input id="url-bar" type="text" placeholder="URL atau kata kunci..." autocomplete="off" spellcheck="false">
-    <button id="go-btn">Go</button>
-  </div>
-</div>
+<div id="bar">
+  <button class="nav-btn" id="btn-back" disabled title="Back">&#8592;</button>
+  <button class="nav-btn" id="btn-fwd"  disabled title="Forward">&#8594;</button>
+  <button class="nav-btn" id="btn-reload" title="Reload">&#8635;</button>
 
-<div id="status-bar">
-  <div id="sdot"></div>
-  <span id="stxt">Siap — koneksi aman lewat proxy</span>
+  <div id="url-wrap">
+    <span id="lock">🔒</span>
+    <input id="url" type="text" placeholder="Masukkan URL..." autocomplete="off" spellcheck="false">
+    <button id="go-btn">&#9654;</button>
+  </div>
+
+  <div id="progress"></div>
 </div>
 
 <div id="frame-wrap">
+  <!-- Home screen -->
   <div id="home">
-    <h1>🔒 Browser Aman</h1>
-    <div id="badge">🛡️ Traffic lewat proxy — tidak terlacak</div>
-    <div class="ql-wrap">
-      <div class="ql" onclick="go('https://google.com')"><span>🔍</span>Google</div>
-      <div class="ql" onclick="go('https://youtube.com')"><span>▶️</span>YouTube</div>
-      <div class="ql" onclick="go('https://github.com')"><span>💻</span>GitHub</div>
-      <div class="ql" onclick="go('https://reddit.com')"><span>📰</span>Reddit</div>
-      <div class="ql" onclick="go('https://wikipedia.org')"><span>📖</span>Wiki</div>
-      <div class="ql" onclick="go('https://twitter.com')"><span>🐦</span>Twitter</div>
+    <div class="home-logo">priv<span>.</span>browser</div>
+    <div class="home-sub">private · lightweight · yours</div>
+    <div class="quick-links">
+      <div class="ql" onclick="navigate('https://google.com')">Google</div>
+      <div class="ql" onclick="navigate('https://youtube.com')">YouTube</div>
+      <div class="ql" onclick="navigate('https://wikipedia.org')">Wikipedia</div>
+      <div class="ql" onclick="navigate('https://reddit.com')">Reddit</div>
     </div>
   </div>
-  <div id="loading"><div class="spin"></div><div id="ltxt" style="font-size:12px;color:#556"></div></div>
-  <iframe id="browser-frame"
-    sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation">
-  </iframe>
+
+  <!-- Loading overlay -->
+  <div id="overlay">
+    <div class="spinner"></div>
+    <div class="load-text" id="load-txt">memuat...</div>
+  </div>
+
+  <iframe id="frame" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"></iframe>
 </div>
 
 <script>
-const urlBar  = document.getElementById('url-bar');
-const frame   = document.getElementById('browser-frame');
-const homeEl  = document.getElementById('home');
-const loading = document.getElementById('loading');
-const ltxt    = document.getElementById('ltxt');
-const sdot    = document.getElementById('sdot');
-const stxt    = document.getElementById('stxt');
-const btnBack = document.getElementById('btn-back');
-const btnFwd  = document.getElementById('btn-fwd');
+  const frame   = document.getElementById('frame');
+  const urlInput= document.getElementById('url');
+  const btnBack = document.getElementById('btn-back');
+  const btnFwd  = document.getElementById('btn-fwd');
+  const btnRel  = document.getElementById('btn-reload');
+  const progress= document.getElementById('progress');
+  const overlay = document.getElementById('overlay');
+  const loadTxt = document.getElementById('load-txt');
+  const lockEl  = document.getElementById('lock');
+  const homeEl  = document.getElementById('home');
 
-let hist = [], hidx = -1, curUrl = '';
+  let history_stack = [];
+  let history_pos   = -1;
+  let loading = false;
 
-function setStatus(type, txt) {
-  sdot.className = type;
-  stxt.textContent = txt;
-}
-
-function proxyUrl(url) {
-  return '/api/proxy?url=' + encodeURIComponent(url);
-}
-
-function resolveInput(s) {
-  s = s.trim();
-  if (!s) return null;
-  if (/^https?:\/\//i.test(s)) return s;
-  if (!s.includes(' ') && s.includes('.')) return 'https://' + s;
-  return 'https://www.google.com/search?q=' + encodeURIComponent(s);
-}
-
-function updateNav() {
-  btnBack.disabled = hidx <= 0;
-  btnFwd.disabled  = hidx >= hist.length - 1;
-}
-
-function go(url, push = true) {
-  if (!url) return;
-  curUrl = url;
-  urlBar.value = url;
-
-  if (push) {
-    hist = hist.slice(0, hidx + 1);
-    hist.push(url);
-    hidx = hist.length - 1;
+  // ── Progress bar ──────────────────────────────────────────────
+  function startProgress() {
+    progress.classList.remove('done');
+    progress.style.width = '0%';
+    setTimeout(() => progress.style.width = '40%', 50);
+    setTimeout(() => progress.style.width = '70%', 400);
   }
-  updateNav();
-
-  homeEl.style.display = 'none';
-  frame.style.display  = 'none';
-  loading.classList.add('show');
-  ltxt.textContent = url;
-  setStatus('loading', 'Memuat...');
-
-  frame.src = proxyUrl(url);
-}
-
-frame.addEventListener('load', () => {
-  loading.classList.remove('show');
-  frame.style.display = 'block';
-  setStatus('ok', 'Aman — traffic lewat proxy Vercel');
-});
-
-frame.addEventListener('error', () => {
-  loading.classList.remove('show');
-  frame.style.display = 'block';
-  setStatus('error', 'Gagal memuat');
-});
-
-// Terima pesan dari halaman yang di-proxy
-window.addEventListener('message', (e) => {
-  if (!e.data) return;
-
-  // Update URL bar
-  if (e.data.t === 'nav' && e.data.u) {
-    curUrl = e.data.u;
-    urlBar.value = e.data.u;
-    // Update history entry saat ini
-    if (hidx >= 0) hist[hidx] = e.data.u;
+  function endProgress() {
+    progress.style.width = '100%';
+    setTimeout(() => progress.classList.add('done'), 300);
+    setTimeout(() => { progress.style.width = '0%'; progress.classList.remove('done'); }, 800);
   }
 
-  // Navigasi baru dari dalam proxy (klik link)
-  if (e.data.t === 'goto' && e.data.u) {
-    go(e.data.u);
-  }
-});
+  // ── Navigate ──────────────────────────────────────────────────
+  function navigate(rawUrl, pushHistory = true) {
+    let url = rawUrl.trim();
+    if (!url) return;
 
-document.getElementById('go-btn').addEventListener('click', () => {
-  const url = resolveInput(urlBar.value);
-  if (url) go(url);
-});
-urlBar.addEventListener('keydown', e => {
-  if (e.key === 'Enter') { const url = resolveInput(urlBar.value); if (url) go(url); }
-});
-btnBack.addEventListener('click', () => {
-  if (hidx > 0) { hidx--; go(hist[hidx], false); }
-});
-btnFwd.addEventListener('click', () => {
-  if (hidx < hist.length - 1) { hidx++; go(hist[hidx], false); }
-});
-document.getElementById('btn-reload').addEventListener('click', () => {
-  if (curUrl) go(curUrl, false);
-});
-document.getElementById('btn-home').addEventListener('click', () => {
-  frame.src = 'about:blank';
-  frame.style.display = 'none';
-  loading.classList.remove('show');
-  homeEl.style.display = 'flex';
-  urlBar.value = '';
-  curUrl = '';
-  setStatus('', 'Siap — koneksi aman lewat proxy');
-});
+    // Tambah https:// jika tidak ada protokol
+    if (!/^https?:\/\//i.test(url)) {
+      // Kalau tampak seperti domain
+      if (url.includes('.') && !url.includes(' ')) {
+        url = 'https://' + url;
+      } else {
+        // Treat sebagai Google search
+        url = 'https://www.google.com/search?q=' + encodeURIComponent(url);
+      }
+    }
 
-function go(url, push = true) {
-  if (!url) return;
-  curUrl = url;
-  urlBar.value = url;
-  if (push) {
-    hist = hist.slice(0, hidx + 1);
-    hist.push(url);
-    hidx = hist.length - 1;
+    const proxyUrl = '/api/proxy?url=' + encodeURIComponent(url);
+
+    // Update history
+    if (pushHistory) {
+      history_stack = history_stack.slice(0, history_pos + 1);
+      history_stack.push(url);
+      history_pos = history_stack.length - 1;
+    }
+
+    updateNavButtons();
+    updateLock(url);
+    urlInput.value = url;
+    homeEl.classList.add('hidden');
+
+    // Show loading
+    loading = true;
+    overlay.classList.add('show');
+    loadTxt.textContent = new URL(url).hostname || 'memuat...';
+    startProgress();
+
+    frame.src = proxyUrl;
   }
-  updateNav();
-  homeEl.style.display = 'none';
-  frame.style.display  = 'none';
-  loading.classList.add('show');
-  ltxt.textContent = url;
-  setStatus('loading', 'Memuat...');
-  frame.src = proxyUrl(url);
-}
+
+  // ── Update UI ─────────────────────────────────────────────────
+  function updateNavButtons() {
+    btnBack.disabled = history_pos <= 0;
+    btnFwd.disabled  = history_pos >= history_stack.length - 1;
+  }
+
+  function updateLock(url) {
+    if (url.startsWith('https://')) {
+      lockEl.textContent = '🔒';
+      lockEl.className = 'secure';
+    } else {
+      lockEl.textContent = '⚠️';
+      lockEl.className = '';
+    }
+  }
+
+  // ── Iframe load event ─────────────────────────────────────────
+  frame.addEventListener('load', () => {
+    loading = false;
+    overlay.classList.remove('show');
+    endProgress();
+  });
+
+  // ── Messages dari iframe ───────────────────────────────────────
+  window.addEventListener('message', (e) => {
+    const d = e.data;
+    if (!d || typeof d !== 'object') return;
+
+    if (d.t === 'goto' && d.u) {
+      navigate(d.u);
+    }
+    if (d.t === 'nav' && d.u) {
+      // Update URL bar tanpa reload (SPA navigation)
+      urlInput.value = d.u;
+      updateLock(d.u);
+      history_stack = history_stack.slice(0, history_pos + 1);
+      history_stack.push(d.u);
+      history_pos = history_stack.length - 1;
+      updateNavButtons();
+    }
+    if (d.t === 'post' && d.u) {
+      // Handle form POST
+      const proxyUrl = '/api/proxy?url=' + encodeURIComponent(d.u);
+      fetch(proxyUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: d.d || ''
+      })
+      .then(r => r.text())
+      .then(html => {
+        const blob = new Blob([html], { type: 'text/html' });
+        frame.src = URL.createObjectURL(blob);
+        navigate(d.u);
+      });
+    }
+  });
+
+  // ── Controls ──────────────────────────────────────────────────
+  btnBack.addEventListener('click', () => {
+    if (history_pos > 0) {
+      history_pos--;
+      navigate(history_stack[history_pos], false);
+    }
+  });
+
+  btnFwd.addEventListener('click', () => {
+    if (history_pos < history_stack.length - 1) {
+      history_pos++;
+      navigate(history_stack[history_pos], false);
+    }
+  });
+
+  btnRel.addEventListener('click', () => {
+    if (history_stack[history_pos]) {
+      navigate(history_stack[history_pos], false);
+    }
+  });
+
+  // ── URL input ─────────────────────────────────────────────────
+  urlInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') navigate(urlInput.value);
+  });
+
+  document.getElementById('go-btn').addEventListener('click', () => {
+    navigate(urlInput.value);
+  });
+
+  urlInput.addEventListener('focus', () => urlInput.select());
 </script>
 </body>
 </html>
