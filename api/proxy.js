@@ -20,6 +20,7 @@ export default async function handler(req, res) {
   try {
     const response = await fetch(targetUrl, {
       method: 'GET',
+      redirect: 'follow',
       headers: {
         'User-Agent': 'Mozilla/5.0 (Linux; Android 9; Mobile) AppleWebKit/537.36 Chrome/91.0.4472.120 Mobile Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -28,9 +29,10 @@ export default async function handler(req, res) {
     });
 
     const contentType = response.headers.get('content-type') || 'text/html';
-    const body = await response.text();
 
-    const baseUrl = new URL(targetUrl);
+    // Pakai URL final setelah redirect sebagai base
+    const finalUrl = response.url || targetUrl;
+    const baseUrl = new URL(finalUrl);
     const origin = baseUrl.origin;
 
     const host = req.headers.host;
@@ -39,42 +41,56 @@ export default async function handler(req, res) {
 
     function rewriteUrl(u) {
       try {
-        // Kalau sudah absolute
+        // Protocol-relative: //domain.com/path
+        if (u.startsWith('//')) {
+          return proxyBase + encodeURIComponent('https:' + u);
+        }
+        // Absolute URL
         if (u.startsWith('http://') || u.startsWith('https://')) {
           return proxyBase + encodeURIComponent(u);
         }
-        // Relative path
+        // Relative /path
         if (u.startsWith('/')) {
           return proxyBase + encodeURIComponent(origin + u);
         }
-        // Relative tanpa slash — resolve dari base path
-        const basePath = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
+        // Relative tanpa slash
+        const basePath = finalUrl.substring(0, finalUrl.lastIndexOf('/') + 1);
         return proxyBase + encodeURIComponent(basePath + u);
       } catch (e) {
         return u;
       }
     }
 
+    const body = await response.text();
+
     let rewritten = body
-      // double quote href/src/action absolute
+      // Protocol-relative double quote
+      .replace(/(href|src|action)="(\/\/[^"]+)"/g, (_, attr, u) => {
+        return `${attr}="${rewriteUrl(u)}"`;
+      })
+      // Protocol-relative single quote
+      .replace(/(href|src|action)='(\/\/[^']+)'/g, (_, attr, u) => {
+        return `${attr}='${rewriteUrl(u)}'`;
+      })
+      // Absolute double quote
       .replace(/(href|src|action)="(https?:\/\/[^"]+)"/g, (_, attr, u) => {
         return `${attr}="${rewriteUrl(u)}"`;
       })
-      // single quote href/src/action absolute
+      // Absolute single quote
       .replace(/(href|src|action)='(https?:\/\/[^']+)'/g, (_, attr, u) => {
         return `${attr}='${rewriteUrl(u)}'`;
       })
-      // double quote relative /path
+      // Relative /path double quote
       .replace(/(href|src|action)="(\/[^"]*)"/g, (_, attr, u) => {
         return `${attr}="${rewriteUrl(u)}"`;
       })
-      // single quote relative /path
+      // Relative /path single quote
       .replace(/(href|src|action)='(\/[^']*)'/g, (_, attr, u) => {
         return `${attr}='${rewriteUrl(u)}'`;
       });
 
     res.setHeader('Content-Type', contentType);
-    res.setHeader('X-Proxied-From', targetUrl);
+    res.setHeader('X-Proxied-From', finalUrl);
     return res.status(response.status).send(rewritten);
 
   } catch (err) {
