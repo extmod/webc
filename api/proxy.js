@@ -6,21 +6,7 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") { res.status(200).end(); return; }
 
   let rawUrl = req.query.url || "";
-
-  // Kalau tidak ada url param, cek referer — mungkin navigasi relatif dari dalam proxy
-  if (!rawUrl) {
-    const referer = req.headers.referer || req.headers.referrer || "";
-    if (referer.includes("/api/proxy?url=")) {
-      try {
-        const refBase = decodeURIComponent(referer.split("/api/proxy?url=")[1].split("&")[0]);
-        const refOrigin = new URL(refBase).origin;
-        // Rebuild URL dari path + query saat ini
-        const fullPath = req.url.replace(/^\/api\/proxy/, "");
-        rawUrl = encodeURIComponent(refOrigin + fullPath);
-      } catch {}
-    }
-    if (!rawUrl) { res.status(400).json({ error: "Missing url" }); return; }
-  }
+  if (!rawUrl) { res.status(400).json({ error: "Missing url" }); return; }
 
   let targetUrl;
   try {
@@ -109,120 +95,123 @@ export default async function handler(req, res) {
       html = html.replace(/\s*crossorigin\s*=\s*["'][^"']*["']/gi, "");
       html = html.replace(/<base[^>]*>/gi, "");
 
-      const esc = (s) => s.replace(/\\/g,'\\\\').replace(/`/g,'\\`').replace(/\$/g,'\\$');
-      const safeOrig = esc(orig);
-      const safeBase = esc(base);
+      // Escape untuk JSON string
+      const safeOrig = JSON.stringify(orig);
+      const safeBase = JSON.stringify(base);
 
       const script = `<script>
 (function(){
 var P='/api/proxy?url=';
-var O='${safeOrig}';
-var B='${safeBase}';
+var O=${safeOrig};
+var B=${safeBase};
 
-function px(u){
-  if(!u||/^(data:|javascript:|#|mailto:|tel:|blob:)/.test(u))return u;
-  if(u.startsWith(P))return u;
+// Fungsi buat absolute URL
+function abs(u){
+  if(!u)return u;
   try{
-    if(u.startsWith('//'))u='https:'+u;
-    else if(u.startsWith('/'))u=B+u;
-    else if(!u.startsWith('http'))u=new URL(u,O).href;
-    return P+encodeURIComponent(u);
+    if(u.startsWith('//'))return 'https:'+u;
+    if(u.startsWith('/'))return B+u;
+    if(u.startsWith('http'))return u;
+    return new URL(u,O).href;
   }catch(e){return u;}
 }
 
+// Fungsi proxy URL
+function px(u){
+  if(!u||/^(data:|javascript:|#|mailto:|tel:|blob:)/.test(u))return u;
+  if(u.startsWith(P))return u;
+  return P+encodeURIComponent(abs(u));
+}
+
+// Kirim navigasi ke parent (index.html)
+function goto(u){
+  try{parent.postMessage({t:'goto',u:u},'*');}catch(e){}
+}
 function notify(u){
-  if(!u||u.startsWith(P))return;
   try{parent.postMessage({t:'nav',u:u},'*');}catch(e){}
 }
 
-// Override location.assign, replace, href setter
-try{
-  var origAssign=window.location.assign.bind(window.location);
-  var origReplace=window.location.replace.bind(window.location);
-  Object.defineProperty(window,'location',{
-    get:function(){return window._loc||location;},
-    configurable:true
-  });
-  window.location.assign=function(u){
-    var abs=px(u);notify(u.startsWith('http')?u:new URL(u,O).href);
-    origAssign(abs);
-  };
-  window.location.replace=function(u){
-    var abs=px(u);notify(u.startsWith('http')?u:new URL(u,O).href);
-    origReplace(abs);
-  };
-}catch(e){}
-
+// Intercept fetch
 var oF=window.fetch;
 window.fetch=function(inp,ini){
   var u=typeof inp==='string'?inp:(inp&&inp.url||'');
   if(u&&!u.startsWith(P)&&(u.startsWith('http')||u.startsWith('//')))
-    return oF(px(u),ini);
+    return oF(P+encodeURIComponent(abs(u)),ini);
   return oF(inp,ini);
 };
 
+// Intercept XHR
 var oO=XMLHttpRequest.prototype.open;
 XMLHttpRequest.prototype.open=function(m,u){
-  if(u&&!u.startsWith(P)&&(u.startsWith('http')||u.startsWith('//')))u=px(u);
+  if(u&&!u.startsWith(P)&&(u.startsWith('http')||u.startsWith('//')))
+    u=P+encodeURIComponent(abs(u));
   return oO.apply(this,[m,u].concat(Array.prototype.slice.call(arguments,2)));
 };
 
-try{
-  var oPS=history.pushState.bind(history);
-  var oRS=history.replaceState.bind(history);
-  history.pushState=function(s,t,u){
-    if(u){try{
-      var abs=u.startsWith('http')?u:new URL(u,O).href;
-      notify(abs);
-      return oPS(s,t,P+encodeURIComponent(abs));
-    }catch(e){}}
-    return oPS(s,t,u);
-  };
-  history.replaceState=function(s,t,u){
-    if(u){try{
-      var abs=u.startsWith('http')?u:new URL(u,O).href;
-      notify(abs);
-      return oRS(s,t,P+encodeURIComponent(abs));
-    }catch(e){}}
-    return oRS(s,t,u);
-  };
-}catch(e){}
-
+// Intercept semua klik link — ini yang paling penting
 document.addEventListener('click',function(e){
   var el=e.target;
   while(el&&el.tagName!=='A')el=el.parentElement;
   if(!el)return;
   var href=el.getAttribute('href');
-  if(!href||/^(javascript:|#|mailto:|tel:)/.test(href))return;
-  e.preventDefault();e.stopPropagation();
-  var abs;
-  try{
-    if(href.startsWith('//'))abs='https:'+href;
-    else if(href.startsWith('/'))abs=B+href;
-    else if(href.startsWith('http'))abs=href;
-    else abs=new URL(href,O).href;
-  }catch(ex){return;}
-  notify(abs);
-  window.location.href=P+encodeURIComponent(abs);
+  if(!href||/^(javascript:|mailto:|tel:)/.test(href))return;
+  if(href==='#'||href.startsWith('#'))return;
+  e.preventDefault();
+  e.stopPropagation();
+  var a=abs(href);
+  goto(a); // minta parent load URL baru
 },true);
 
+// Intercept form submit
 document.addEventListener('submit',function(e){
   var f=e.target;
   var action=f.action||O;
-  if(action.startsWith(P))return;
-  e.preventDefault();e.stopPropagation();
+  e.preventDefault();
+  e.stopPropagation();
   var params=new URLSearchParams(new FormData(f)).toString();
-  var abs;
-  try{
-    if(action.startsWith('//'))abs='https:'+action;
-    else if(action.startsWith('/'))abs=B+action;
-    else if(action.startsWith('http'))abs=action;
-    else abs=new URL(action,O).href;
-  }catch(ex){abs=O;}
-  if(params){var sep=abs.includes('?')?'&':'?';abs=abs+sep+params;}
-  notify(abs);
-  window.location.href=P+encodeURIComponent(abs);
+  var a=abs(action);
+  if(params){var sep=a.includes('?')?'&':'?';a+=sep+params;}
+  goto(a);
 },true);
+
+// Intercept pushState / replaceState (Google Search pakai ini)
+try{
+  var oPS=history.pushState.bind(history);
+  var oRS=history.replaceState.bind(history);
+  history.pushState=function(s,t,u){
+    var result=oPS(s,t,u);
+    if(u)notify(abs(u));
+    return result;
+  };
+  history.replaceState=function(s,t,u){
+    var result=oRS(s,t,u);
+    if(u)notify(abs(u));
+    return result;
+  };
+}catch(e){}
+
+// Intercept window.location.href = "..." lewat MutationObserver pada navigasi
+// Serta intercept assign/replace
+(function(){
+  var nav=window.navigator;
+  // Wrap location setter
+  try{
+    var desc=Object.getOwnPropertyDescriptor(window,'location');
+    if(!desc||desc.configurable){
+      var _href=location.href;
+      setInterval(function(){
+        var cur=location.href;
+        if(cur!==_href){
+          _href=cur;
+          // Cek apakah URL sudah lewat proxy
+          if(!cur.startsWith(P)&&cur.startsWith('http')){
+            notify(cur);
+          }
+        }
+      },300);
+    }
+  }catch(e){}
+})();
 
 notify(O);
 })();
