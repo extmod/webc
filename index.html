@@ -15,29 +15,48 @@
       display: flex;
       flex-direction: column;
       overflow: hidden;
+      width: 100%;
     }
 
     /* ── Toolbar ── */
     #toolbar {
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
-      gap: 8px;
-      padding: 10px 12px;
+      gap: 6px;
+      padding: 8px 10px;
       background: #16213e;
       border-bottom: 1px solid #0f3460;
       flex-shrink: 0;
+    }
+
+    #toolbar-nav {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
+    #toolbar-search {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex: 1;
+      min-width: 0;
+      width: 100%;
     }
 
     .nav-btn {
       background: none;
       border: none;
       color: #aaa;
-      font-size: 18px;
+      font-size: 16px;
       cursor: pointer;
-      padding: 6px 8px;
+      padding: 5px 7px;
       border-radius: 6px;
       transition: background 0.2s, color 0.2s;
       line-height: 1;
+      flex-shrink: 0;
     }
     .nav-btn:hover { background: #0f3460; color: #fff; }
     .nav-btn:disabled { color: #444; cursor: default; }
@@ -45,12 +64,13 @@
 
     #url-bar {
       flex: 1;
+      min-width: 0;
       background: #0f3460;
       border: 1px solid #1a4a8a;
       border-radius: 20px;
       color: #fff;
       font-size: 14px;
-      padding: 8px 16px;
+      padding: 8px 14px;
       outline: none;
       transition: border-color 0.2s, box-shadow 0.2s;
     }
@@ -58,7 +78,7 @@
       border-color: #4a9eff;
       box-shadow: 0 0 0 3px rgba(74,158,255,0.15);
     }
-    #url-bar::placeholder { color: #667; }
+    #url-bar::placeholder { color: #667; font-size: 13px; }
 
     #go-btn {
       background: #4a9eff;
@@ -67,10 +87,11 @@
       color: #fff;
       font-size: 13px;
       font-weight: 600;
-      padding: 8px 18px;
+      padding: 8px 16px;
       cursor: pointer;
       transition: background 0.2s;
       white-space: nowrap;
+      flex-shrink: 0;
     }
     #go-btn:hover { background: #2a7edf; }
 
@@ -102,9 +123,11 @@
       flex: 1;
       position: relative;
       overflow: hidden;
+      width: 100%;
     }
 
     #browser-frame {
+      min-width: 100%;
       width: 100%; height: 100%;
       border: none;
       background: #fff;
@@ -205,12 +228,16 @@
 
 <!-- Toolbar -->
 <div id="toolbar">
-  <button class="nav-btn" id="btn-back" title="Back" disabled>&#8592;</button>
-  <button class="nav-btn" id="btn-forward" title="Forward" disabled>&#8594;</button>
-  <button class="nav-btn" id="btn-reload" title="Reload">&#8635;</button>
-  <button class="nav-btn" id="btn-home" title="Home">&#8962;</button>
-  <input id="url-bar" type="text" placeholder="Ketik URL atau kata kunci pencarian..." autocomplete="off" spellcheck="false">
-  <button id="go-btn">Go</button>
+  <div id="toolbar-nav">
+    <button class="nav-btn" id="btn-back" title="Back" disabled>&#8592;</button>
+    <button class="nav-btn" id="btn-forward" title="Forward" disabled>&#8594;</button>
+    <button class="nav-btn" id="btn-reload" title="Reload">&#8635;</button>
+    <button class="nav-btn" id="btn-home" title="Home">&#8962;</button>
+  </div>
+  <div id="toolbar-search">
+    <input id="url-bar" type="text" placeholder="URL atau kata kunci..." autocomplete="off" spellcheck="false">
+    <button id="go-btn">Go</button>
+  </div>
 </div>
 
 <!-- Status bar -->
@@ -382,6 +409,10 @@
     urlBar.value = '';
     currentUrl = '';
     setStatus('', 'Siap — koneksi aman lewat proxy');
+  });
+  // Listen URL update from iframe
+  window.addEventListener('message',(e)=>{
+    if(e.data&&e.data.t==='nav'&&e.data.u){urlBar.value=e.data.u;currentUrl=e.data.u;}
   });
 </script>
 </body>
