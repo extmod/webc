@@ -188,8 +188,16 @@ window.addEventListener('popstate',function(){
   try{var cur=location.href;if(cur&&!cur.startsWith(P))notify(cur);}catch(e){}
 });
 
-notify(O);
-})();
+// Notify dengan URL yang benar — baca dari iframe location, bukan O yang hardcoded
+window.addEventListener('load',function(){
+  var src='';
+  try{src=window.location.href;}catch(e){}
+  if(src&&src.includes('/api/proxy?url=')){
+    try{notify(decodeURIComponent(src.split('/api/proxy?url=')[1]));}catch(e){notify(O);}
+  } else {
+    notify(O);
+  }
+});
 <\/script>`;
 
       html = html.replace(/<head([^>]*)>/i, `<head$1>${script}`);
