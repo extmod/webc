@@ -1,137 +1,116 @@
 <!DOCTYPE html>
-<html lang="id">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Browser</title>
+<title>Navigator</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700&display=swap');
-
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
-    --bg: #0e0e0f;
-    --surface: #161618;
-    --border: #2a2a2e;
-    --accent: #c8ff00;
-    --accent2: #00d4ff;
-    --text: #e8e8e8;
-    --muted: #666;
-    --bar-h: 52px;
+    --bg: #1c1c1e;
+    --bar: #2c2c2e;
+    --border: #3a3a3c;
+    --input-bg: #1c1c1e;
+    --accent: #0a84ff;
+    --text: #f2f2f7;
+    --muted: #8e8e93;
+    --bar-h: 48px;
   }
 
-  html, body {
-    height: 100%;
-    background: var(--bg);
-    color: var(--text);
-    font-family: 'Syne', sans-serif;
-    overflow: hidden;
-  }
+  html, body { height: 100%; background: var(--bg); overflow: hidden; }
 
-  /* ── Top Bar ── */
-  #bar {
+  /* ── Toolbar ── */
+  #toolbar {
     height: var(--bar-h);
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
+    background: var(--bar);
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 0 12px;
+    padding: 0 8px;
+    gap: 6px;
+    border-bottom: 1px solid var(--border);
     position: relative;
-    z-index: 10;
   }
 
-  /* Nav buttons */
-  .nav-btn {
-    width: 32px; height: 32px;
-    border: 1px solid var(--border);
-    background: transparent;
+  .tb-btn {
+    width: 30px; height: 30px;
+    background: none;
+    border: none;
     color: var(--muted);
-    border-radius: 8px;
+    font-size: 16px;
     cursor: pointer;
+    border-radius: 6px;
     display: flex; align-items: center; justify-content: center;
-    font-size: 14px;
-    transition: all .15s;
+    transition: background .1s, color .1s;
     flex-shrink: 0;
   }
-  .nav-btn:hover:not(:disabled) { background: var(--border); color: var(--text); }
-  .nav-btn:disabled { opacity: .3; cursor: default; }
+  .tb-btn:hover:not(:disabled) { background: var(--border); color: var(--text); }
+  .tb-btn:disabled { opacity: .35; cursor: default; }
+  .tb-btn svg { width: 16px; height: 16px; fill: currentColor; }
 
   /* URL bar */
-  #url-wrap {
+  #urlbar {
     flex: 1;
     display: flex;
     align-items: center;
-    background: var(--bg);
+    background: var(--input-bg);
     border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 0 12px;
-    gap: 8px;
-    height: 36px;
-    transition: border-color .2s;
+    border-radius: 8px;
+    height: 32px;
+    padding: 0 10px;
+    gap: 6px;
   }
-  #url-wrap:focus-within { border-color: var(--accent); }
+  #urlbar:focus-within { border-color: var(--accent); }
 
-  #lock {
-    font-size: 11px;
+  #lock-icon {
     color: var(--muted);
+    font-size: 11px;
     flex-shrink: 0;
+    line-height: 1;
   }
-  #lock.secure { color: #4caf50; }
+  #lock-icon.ok { color: #32d74b; }
+  #lock-icon.warn { color: #ff9f0a; }
 
-  #url {
+  #urlinput {
     flex: 1;
-    background: transparent;
+    background: none;
     border: none;
     outline: none;
     color: var(--text);
-    font-family: 'DM Mono', monospace;
-    font-size: 12px;
+    font-size: 13px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     min-width: 0;
   }
-  #url::placeholder { color: var(--muted); }
+  #urlinput::placeholder { color: var(--muted); }
 
-  #go-btn {
-    width: 28px; height: 28px;
-    border: none;
-    background: var(--accent);
-    color: #000;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 13px;
-    display: flex; align-items: center; justify-content: center;
-    transition: all .15s;
-    flex-shrink: 0;
-  }
-  #go-btn:hover { background: #d4ff1a; transform: scale(1.05); }
-
-  /* Loading bar */
-  #progress {
+  /* Progress bar */
+  #prog {
     position: absolute;
     bottom: 0; left: 0;
     height: 2px;
-    width: 0%;
-    background: linear-gradient(90deg, var(--accent), var(--accent2));
-    transition: width .3s ease;
-    border-radius: 0 2px 2px 0;
+    width: 0;
+    background: var(--accent);
+    transition: width .25s ease, opacity .3s;
+    pointer-events: none;
   }
-  #progress.done { opacity: 0; transition: opacity .4s .2s; }
 
-  /* ── Iframe ── */
-  #frame-wrap {
+  /* ── Content area ── */
+  #content {
     position: relative;
     height: calc(100vh - var(--bar-h));
+    width: 100%;
   }
 
   iframe {
+    position: absolute;
+    inset: 0;
     width: 100%; height: 100%;
     border: none;
     background: #fff;
-    display: block;
   }
 
-  /* ── Loading overlay ── */
-  #overlay {
+  /* ── New tab page ── */
+  #newtab {
     position: absolute;
     inset: 0;
     background: var(--bg);
@@ -139,216 +118,179 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 16px;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity .2s;
-    z-index: 5;
+    gap: 24px;
+    z-index: 2;
   }
-  #overlay.show { opacity: 1; pointer-events: all; }
+  #newtab.hidden { display: none; }
 
-  .spinner {
-    width: 36px; height: 36px;
-    border: 2px solid var(--border);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin .7s linear infinite;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
-
-  .load-text {
-    font-family: 'DM Mono', monospace;
-    font-size: 11px;
-    color: var(--muted);
-    letter-spacing: .05em;
-  }
-
-  /* ── Home screen ── */
-  #home {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 32px;
-    z-index: 4;
-    background: var(--bg);
-  }
-  #home.hidden { display: none; }
-
-  .home-logo {
-    font-family: 'Syne', sans-serif;
-    font-weight: 700;
-    font-size: 42px;
-    letter-spacing: -.02em;
+  #newtab-time {
+    font-size: 52px;
+    font-weight: 200;
     color: var(--text);
+    letter-spacing: -2px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
-  .home-logo span { color: var(--accent); }
-
-  .home-sub {
-    font-size: 13px;
+  #newtab-date {
+    font-size: 14px;
     color: var(--muted);
-    font-family: 'DM Mono', monospace;
+    margin-top: -16px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
 
-  .quick-links {
+  #newtab-search {
     display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-    justify-content: center;
-    max-width: 400px;
-  }
-
-  .ql {
-    padding: 8px 16px;
-    background: var(--surface);
+    align-items: center;
+    background: var(--bar);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 24px;
+    height: 44px;
+    width: min(480px, 90vw);
+    padding: 0 16px;
+    gap: 10px;
+    transition: border-color .2s;
+  }
+  #newtab-search:focus-within { border-color: var(--accent); }
+  #newtab-search svg { width: 16px; height: 16px; fill: var(--muted); flex-shrink: 0; }
+
+  #newtab-input {
+    flex: 1;
+    background: none;
+    border: none;
+    outline: none;
     color: var(--text);
-    font-size: 12px;
-    cursor: pointer;
-    transition: all .15s;
-    font-family: 'DM Mono', monospace;
+    font-size: 15px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
-  .ql:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-    background: rgba(200,255,0,.05);
-  }
+  #newtab-input::placeholder { color: var(--muted); }
 </style>
 </head>
 <body>
 
-<div id="bar">
-  <button class="nav-btn" id="btn-back" disabled title="Back">&#8592;</button>
-  <button class="nav-btn" id="btn-fwd"  disabled title="Forward">&#8594;</button>
-  <button class="nav-btn" id="btn-reload" title="Reload">&#8635;</button>
+<div id="toolbar">
+  <button class="tb-btn" id="btn-back" disabled title="Back">
+    <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+  </button>
+  <button class="tb-btn" id="btn-fwd" disabled title="Forward">
+    <svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+  </button>
+  <button class="tb-btn" id="btn-reload" title="Reload">
+    <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+  </button>
 
-  <div id="url-wrap">
-    <span id="lock">🔒</span>
-    <input id="url" type="text" placeholder="Masukkan URL..." autocomplete="off" spellcheck="false">
-    <button id="go-btn">&#9654;</button>
+  <div id="urlbar">
+    <span id="lock-icon">🔒</span>
+    <input id="urlinput" type="text" placeholder="Search or enter address" autocomplete="off" spellcheck="false">
   </div>
 
-  <div id="progress"></div>
+  <div id="prog"></div>
 </div>
 
-<div id="frame-wrap">
-  <!-- Home screen -->
-  <div id="home">
-    <div class="home-logo">priv<span>.</span>browser</div>
-    <div class="home-sub">private · lightweight · yours</div>
-    <div class="quick-links">
-      <div class="ql" onclick="navigate('https://google.com')">Google</div>
-      <div class="ql" onclick="navigate('https://youtube.com')">YouTube</div>
-      <div class="ql" onclick="navigate('https://wikipedia.org')">Wikipedia</div>
-      <div class="ql" onclick="navigate('https://reddit.com')">Reddit</div>
+<div id="content">
+  <div id="newtab">
+    <div id="newtab-time">00:00</div>
+    <div id="newtab-date">Loading...</div>
+    <div id="newtab-search">
+      <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+      <input id="newtab-input" type="text" placeholder="Search the web..." autocomplete="off" spellcheck="false">
     </div>
-  </div>
-
-  <!-- Loading overlay -->
-  <div id="overlay">
-    <div class="spinner"></div>
-    <div class="load-text" id="load-txt">memuat...</div>
   </div>
 
   <iframe id="frame"></iframe>
 </div>
 
 <script>
-  const frame   = document.getElementById('frame');
-  const urlInput= document.getElementById('url');
-  const btnBack = document.getElementById('btn-back');
-  const btnFwd  = document.getElementById('btn-fwd');
-  const btnRel  = document.getElementById('btn-reload');
-  const progress= document.getElementById('progress');
-  const overlay = document.getElementById('overlay');
-  const loadTxt = document.getElementById('load-txt');
-  const lockEl  = document.getElementById('lock');
-  const homeEl  = document.getElementById('home');
+  const frame     = document.getElementById('frame');
+  const urlinput  = document.getElementById('urlinput');
+  const btnBack   = document.getElementById('btn-back');
+  const btnFwd    = document.getElementById('btn-fwd');
+  const btnReload = document.getElementById('btn-reload');
+  const prog      = document.getElementById('prog');
+  const lockEl    = document.getElementById('lock-icon');
+  const newtab    = document.getElementById('newtab');
+  const ntInput   = document.getElementById('newtab-input');
 
-  let history_stack = [];
-  let history_pos   = -1;
-  let loading = false;
+  let stack = [], pos = -1;
 
-  // ── Progress bar ──────────────────────────────────────────────
-  function startProgress() {
-    progress.classList.remove('done');
-    progress.style.width = '0%';
-    setTimeout(() => progress.style.width = '40%', 50);
-    setTimeout(() => progress.style.width = '70%', 400);
+  // ── Clock ─────────────────────────────────────────────────────
+  function updateClock() {
+    const now = new Date();
+    const h = String(now.getHours()).padStart(2,'0');
+    const m = String(now.getMinutes()).padStart(2,'0');
+    document.getElementById('newtab-time').textContent = `${h}:${m}`;
+    document.getElementById('newtab-date').textContent = now.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
   }
-  function endProgress() {
-    progress.style.width = '100%';
-    setTimeout(() => progress.classList.add('done'), 300);
-    setTimeout(() => { progress.style.width = '0%'; progress.classList.remove('done'); }, 800);
+  updateClock();
+  setInterval(updateClock, 10000);
+
+  // ── Progress ──────────────────────────────────────────────────
+  function progStart() {
+    prog.style.opacity = '1';
+    prog.style.transition = 'width .25s ease';
+    prog.style.width = '0';
+    setTimeout(() => prog.style.width = '35%', 30);
+    setTimeout(() => prog.style.width = '65%', 500);
+  }
+  function progEnd() {
+    prog.style.width = '100%';
+    setTimeout(() => { prog.style.opacity = '0'; prog.style.width = '0'; }, 400);
   }
 
   // ── Navigate ──────────────────────────────────────────────────
-  function navigate(rawUrl, pushHistory = true) {
-    let url = rawUrl.trim();
+  function navigate(raw, push = true) {
+    let url = raw.trim();
     if (!url) return;
 
-    // Tambah https:// jika tidak ada protokol
     if (!/^https?:\/\//i.test(url)) {
-      // Kalau tampak seperti domain
-      if (url.includes('.') && !url.includes(' ')) {
+      if (/^[\w-]+(\.[\w-]+)+/.test(url) && !url.includes(' ')) {
         url = 'https://' + url;
       } else {
-        // Treat sebagai Google search
         url = 'https://www.google.com/search?q=' + encodeURIComponent(url);
       }
     }
 
-    const proxyUrl = '/api/proxy?url=' + encodeURIComponent(url);
-
-    // Update history
-    if (pushHistory) {
-      history_stack = history_stack.slice(0, history_pos + 1);
-      history_stack.push(url);
-      history_pos = history_stack.length - 1;
+    if (push) {
+      stack = stack.slice(0, pos + 1);
+      stack.push(url);
+      pos = stack.length - 1;
     }
 
-    updateNavButtons();
-    updateLock(url);
-    urlInput.value = url;
-    homeEl.classList.add('hidden');
-
-    // Show loading
-    loading = true;
-    overlay.classList.add('show');
-    loadTxt.textContent = new URL(url).hostname || 'memuat...';
-    startProgress();
-
-    frame.src = proxyUrl;
+    updateNav();
+    setLock(url);
+    urlinput.value = url;
+    newtab.classList.add('hidden');
+    progStart();
+    frame.src = '/api/proxy?url=' + encodeURIComponent(url);
   }
 
-  // ── Update UI ─────────────────────────────────────────────────
-  function updateNavButtons() {
-    btnBack.disabled = history_pos <= 0;
-    btnFwd.disabled  = history_pos >= history_stack.length - 1;
+  function updateNav() {
+    btnBack.disabled = pos <= 0;
+    btnFwd.disabled  = pos >= stack.length - 1;
   }
 
-  function updateLock(url) {
+  function setLock(url) {
     if (url.startsWith('https://')) {
-      lockEl.textContent = '🔒';
-      lockEl.className = 'secure';
+      lockEl.textContent = '🔒'; lockEl.className = 'ok';
+    } else if (url.startsWith('http://')) {
+      lockEl.textContent = '⚠️'; lockEl.className = 'warn';
     } else {
-      lockEl.textContent = '⚠️';
-      lockEl.className = '';
+      lockEl.textContent = '🔒'; lockEl.className = '';
     }
   }
 
-  // ── Iframe load event ─────────────────────────────────────────
-  frame.addEventListener('load', () => {
-    loading = false;
-    overlay.classList.remove('show');
-    endProgress();
-  });
+  // ── Events ────────────────────────────────────────────────────
+  frame.addEventListener('load', progEnd);
 
-  // ── Messages dari iframe ───────────────────────────────────────
-  window.addEventListener('message', (e) => {
+  urlinput.addEventListener('keydown', e => { if (e.key === 'Enter') navigate(urlinput.value); });
+  urlinput.addEventListener('focus', () => urlinput.select());
+
+  ntInput.addEventListener('keydown', e => { if (e.key === 'Enter') navigate(ntInput.value); });
+
+  btnBack.addEventListener('click', () => { if (pos > 0) { pos--; navigate(stack[pos], false); } });
+  btnFwd.addEventListener('click',  () => { if (pos < stack.length - 1) { pos++; navigate(stack[pos], false); } });
+  btnReload.addEventListener('click', () => { if (stack[pos]) navigate(stack[pos], false); });
+
+  // ── Messages from iframe ──────────────────────────────────────
+  window.addEventListener('message', e => {
     const d = e.data;
     if (!d || typeof d !== 'object') return;
 
@@ -356,62 +298,26 @@
       navigate(d.u);
     }
     if (d.t === 'nav' && d.u) {
-      // Update URL bar tanpa reload (SPA navigation)
-      urlInput.value = d.u;
-      updateLock(d.u);
-      history_stack = history_stack.slice(0, history_pos + 1);
-      history_stack.push(d.u);
-      history_pos = history_stack.length - 1;
-      updateNavButtons();
+      urlinput.value = d.u;
+      setLock(d.u);
+      stack = stack.slice(0, pos + 1);
+      stack.push(d.u);
+      pos = stack.length - 1;
+      updateNav();
     }
     if (d.t === 'post' && d.u) {
-      // Handle form POST
-      const proxyUrl = '/api/proxy?url=' + encodeURIComponent(d.u);
-      fetch(proxyUrl, {
+      fetch('/api/proxy?url=' + encodeURIComponent(d.u), {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: d.d || ''
-      })
-      .then(r => r.text())
-      .then(html => {
+      }).then(r => r.text()).then(html => {
         const blob = new Blob([html], { type: 'text/html' });
         frame.src = URL.createObjectURL(blob);
-        navigate(d.u);
+        urlinput.value = d.u;
+        setLock(d.u);
       });
     }
   });
-
-  // ── Controls ──────────────────────────────────────────────────
-  btnBack.addEventListener('click', () => {
-    if (history_pos > 0) {
-      history_pos--;
-      navigate(history_stack[history_pos], false);
-    }
-  });
-
-  btnFwd.addEventListener('click', () => {
-    if (history_pos < history_stack.length - 1) {
-      history_pos++;
-      navigate(history_stack[history_pos], false);
-    }
-  });
-
-  btnRel.addEventListener('click', () => {
-    if (history_stack[history_pos]) {
-      navigate(history_stack[history_pos], false);
-    }
-  });
-
-  // ── URL input ─────────────────────────────────────────────────
-  urlInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') navigate(urlInput.value);
-  });
-
-  document.getElementById('go-btn').addEventListener('click', () => {
-    navigate(urlInput.value);
-  });
-
-  urlInput.addEventListener('focus', () => urlInput.select());
 </script>
 </body>
 </html>
