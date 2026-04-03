@@ -6,7 +6,21 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") { res.status(200).end(); return; }
 
   let rawUrl = req.query.url || "";
-  if (!rawUrl) { res.status(400).json({ error: "Missing url" }); return; }
+
+  // Kalau tidak ada url param, cek referer — mungkin navigasi relatif dari dalam proxy
+  if (!rawUrl) {
+    const referer = req.headers.referer || req.headers.referrer || "";
+    if (referer.includes("/api/proxy?url=")) {
+      try {
+        const refBase = decodeURIComponent(referer.split("/api/proxy?url=")[1].split("&")[0]);
+        const refOrigin = new URL(refBase).origin;
+        // Rebuild URL dari path + query saat ini
+        const fullPath = req.url.replace(/^\/api\/proxy/, "");
+        rawUrl = encodeURIComponent(refOrigin + fullPath);
+      } catch {}
+    }
+    if (!rawUrl) { res.status(400).json({ error: "Missing url" }); return; }
+  }
 
   let targetUrl;
   try {
@@ -95,15 +109,15 @@ export default async function handler(req, res) {
       html = html.replace(/\s*crossorigin\s*=\s*["'][^"']*["']/gi, "");
       html = html.replace(/<base[^>]*>/gi, "");
 
-      // ORIG_URL disimpan di meta tag — dibaca JS tanpa hardcode di dalam string JS
-      const metaOrig = `<meta name="x-proxy-orig" content="${orig.replace(/"/g,'&quot;')}">`;
-      const metaBase = `<meta name="x-proxy-base" content="${base.replace(/"/g,'&quot;')}">`;
+      const esc = (s) => s.replace(/\\/g,'\\\\').replace(/`/g,'\\`').replace(/\$/g,'\\$');
+      const safeOrig = esc(orig);
+      const safeBase = esc(base);
 
       const script = `<script>
 (function(){
 var P='/api/proxy?url=';
-var O=document.querySelector('meta[name="x-proxy-orig"]').content;
-var B=document.querySelector('meta[name="x-proxy-base"]').content;
+var O='${safeOrig}';
+var B='${safeBase}';
 
 function px(u){
   if(!u||/^(data:|javascript:|#|mailto:|tel:|blob:)/.test(u))return u;
@@ -121,8 +135,23 @@ function notify(u){
   try{parent.postMessage({t:'nav',u:u},'*');}catch(e){}
 }
 
-// Notify parent — gunakan O dari meta, bukan hardcode
-notify(O);
+// Override location.assign, replace, href setter
+try{
+  var origAssign=window.location.assign.bind(window.location);
+  var origReplace=window.location.replace.bind(window.location);
+  Object.defineProperty(window,'location',{
+    get:function(){return window._loc||location;},
+    configurable:true
+  });
+  window.location.assign=function(u){
+    var abs=px(u);notify(u.startsWith('http')?u:new URL(u,O).href);
+    origAssign(abs);
+  };
+  window.location.replace=function(u){
+    var abs=px(u);notify(u.startsWith('http')?u:new URL(u,O).href);
+    origReplace(abs);
+  };
+}catch(e){}
 
 var oF=window.fetch;
 window.fetch=function(inp,ini){
@@ -142,11 +171,19 @@ try{
   var oPS=history.pushState.bind(history);
   var oRS=history.replaceState.bind(history);
   history.pushState=function(s,t,u){
-    if(u)try{notify(u.startsWith('http')?u:new URL(u,O).href);}catch(e){}
+    if(u){try{
+      var abs=u.startsWith('http')?u:new URL(u,O).href;
+      notify(abs);
+      return oPS(s,t,P+encodeURIComponent(abs));
+    }catch(e){}}
     return oPS(s,t,u);
   };
   history.replaceState=function(s,t,u){
-    if(u)try{notify(u.startsWith('http')?u:new URL(u,O).href);}catch(e){}
+    if(u){try{
+      var abs=u.startsWith('http')?u:new URL(u,O).href;
+      notify(abs);
+      return oRS(s,t,P+encodeURIComponent(abs));
+    }catch(e){}}
     return oRS(s,t,u);
   };
 }catch(e){}
@@ -157,8 +194,7 @@ document.addEventListener('click',function(e){
   if(!el)return;
   var href=el.getAttribute('href');
   if(!href||/^(javascript:|#|mailto:|tel:)/.test(href))return;
-  e.preventDefault();
-  e.stopPropagation();
+  e.preventDefault();e.stopPropagation();
   var abs;
   try{
     if(href.startsWith('//'))abs='https:'+href;
@@ -174,8 +210,7 @@ document.addEventListener('submit',function(e){
   var f=e.target;
   var action=f.action||O;
   if(action.startsWith(P))return;
-  e.preventDefault();
-  e.stopPropagation();
+  e.preventDefault();e.stopPropagation();
   var params=new URLSearchParams(new FormData(f)).toString();
   var abs;
   try{
@@ -189,20 +224,11 @@ document.addEventListener('submit',function(e){
   window.location.href=P+encodeURIComponent(abs);
 },true);
 
-window.addEventListener('popstate',function(){
-  try{
-    var cur=location.href;
-    if(cur&&cur.includes(P)){
-      cur=decodeURIComponent(cur.split(P)[1]);
-    }
-    notify(cur);
-  }catch(e){}
-});
-
+notify(O);
 })();
 <\/script>`;
 
-      html = html.replace(/<head([^>]*)>/i, `<head$1>${metaOrig}${metaBase}${script}`);
+      html = html.replace(/<head([^>]*)>/i, `<head$1>${script}`);
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.status(status).send(html);
     } else {
