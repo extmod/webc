@@ -39,28 +39,27 @@ export default async function handler(req, res) {
     const proto = req.headers['x-forwarded-proto'] || 'https';
     const proxyBase = `${proto}://${host}/api/proxy?url=`;
 
-    function rewriteUrl(u) {
-      try {
-        // Protocol-relative: //domain.com/path
-        if (u.startsWith('//')) {
-          return proxyBase + encodeURIComponent('https:' + u);
-        }
-        // Absolute URL
-        if (u.startsWith('http://') || u.startsWith('https://')) {
-          return proxyBase + encodeURIComponent(u);
-        }
-        // Relative /path
-        if (u.startsWith('/')) {
-          return proxyBase + encodeURIComponent(origin + u);
-        }
-        // Relative tanpa slash
-        const basePath = finalUrl.substring(0, finalUrl.lastIndexOf('/') + 1);
-        return proxyBase + encodeURIComponent(basePath + u);
-      } catch (e) {
-        return u;
-      }
+     function rewriteUrl(u) {
+  try {
+    // Jangan rewrite kalau sudah URL proxy kita sendiri
+    if (u.includes('/api/proxy?url=')) {
+      return u;
     }
-
+    if (u.startsWith('//')) {
+      return proxyBase + encodeURIComponent('https:' + u);
+    }
+    if (u.startsWith('http://') || u.startsWith('https://')) {
+      return proxyBase + encodeURIComponent(u);
+    }
+    if (u.startsWith('/')) {
+      return proxyBase + encodeURIComponent(origin + u);
+    }
+    const basePath = finalUrl.substring(0, finalUrl.lastIndexOf('/') + 1);
+    return proxyBase + encodeURIComponent(basePath + u);
+  } catch (e) {
+    return u;
+  }
+}
     const body = await response.text();
 
     let rewritten = body
