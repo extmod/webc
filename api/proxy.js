@@ -17,13 +17,18 @@ export default async function handler(req, res) {
   }
 
   try {
-    const targetOrigin = new URL(targetUrl).origin;
+    const parsedTarget = new URL(targetUrl);
+    const targetOrigin = parsedTarget.origin;
+    // base adalah direktori dari URL aktif — penting untuk relative URL tanpa slash
+    const targetBase = targetUrl.endsWith("/")
+      ? targetUrl
+      : targetUrl.substring(0, targetUrl.lastIndexOf("/") + 1);
 
     let body = undefined;
-    if (!["GET","HEAD"].includes(req.method)) {
+    if (!["GET", "HEAD"].includes(req.method)) {
       body = await new Promise((resolve) => {
         const chunks = [];
-        req.on("data", c => chunks.push(c));
+        req.on("data", (c) => chunks.push(c));
         req.on("end", () => resolve(Buffer.concat(chunks)));
       });
     }
@@ -42,7 +47,8 @@ export default async function handler(req, res) {
       redirect: "manual",
     });
 
-    if ([301,302,303,307,308].includes(fetchRes.status)) {
+    // Handle redirect
+    if ([301, 302, 303, 307, 308].includes(fetchRes.status)) {
       let loc = fetchRes.headers.get("location") || "";
       if (loc) {
         if (loc.startsWith("//")) loc = "https:" + loc;
@@ -56,74 +62,115 @@ export default async function handler(req, res) {
 
     const ct = fetchRes.headers.get("content-type") || "";
     const isHtml = ct.includes("text/html");
+    const isCss = ct.includes("text/css");
 
-    const skip = new Set([
-      "content-encoding","transfer-encoding","connection","keep-alive",
-      "upgrade","x-frame-options","content-security-policy",
-      "content-security-policy-report-only","strict-transport-security","location",
+    // Skip headers yang bermasalah
+    const skipHeaders = new Set([
+      "content-encoding", "transfer-encoding", "connection", "keep-alive",
+      "upgrade", "x-frame-options", "content-security-policy",
+      "content-security-policy-report-only", "strict-transport-security",
+      "location", "set-cookie",
     ]);
     fetchRes.headers.forEach((v, k) => {
-      if (!skip.has(k.toLowerCase())) try { res.setHeader(k, v); } catch {}
+      if (!skipHeaders.has(k.toLowerCase())) try { res.setHeader(k, v); } catch {}
     });
 
     const status = (fetchRes.status >= 200 && fetchRes.status <= 599) ? fetchRes.status : 200;
 
+    // ─── Fungsi rewrite URL ────────────────────────────────────────────────
+    function px(u) {
+      if (!u || typeof u !== "string") return u;
+      u = u.trim();
+      if (/^(data:|javascript:|#|mailto:|tel:|blob:|about:)/.test(u)) return u;
+      if (u.startsWith("/api/proxy")) return u;
+      try {
+        if (u.startsWith("//")) u = "https:" + u;
+        else if (u.startsWith("/")) u = targetOrigin + u;
+        else if (!u.startsWith("http")) u = new URL(u, targetBase).href; // ← FIX: pakai targetBase bukan targetOrigin
+        return `/api/proxy?url=${encodeURIComponent(u)}`;
+      } catch {
+        return u;
+      }
+    }
+
+    // ─── Rewrite CSS content ───────────────────────────────────────────────
+    function rewriteCss(css) {
+      // url('...') dan url("...") dan url(...)
+      return css.replace(/url\(\s*(['"]?)(.*?)\1\s*\)/gi, (_, q, u) => {
+        const rewritten = px(u);
+        return `url(${q}${rewritten}${q})`;
+      });
+    }
+
+    // ─── Proses HTML ───────────────────────────────────────────────────────
     if (isHtml) {
       let html = await fetchRes.text();
-      const orig = targetUrl;
-      const base = targetOrigin;
 
-      function px(u) {
-        if (!u) return u;
-        if (/^(data:|javascript:|#|mailto:|tel:|blob:)/.test(u)) return u;
-        if (u.startsWith("/api/proxy")) return u;
-        try {
-          if (u.startsWith("//")) u = "https:" + u;
-          else if (u.startsWith("/")) u = base + u;
-          else if (!u.startsWith("http")) u = new URL(u, orig).href;
-          return `/api/proxy?url=${encodeURIComponent(u)}`;
-        } catch { return u; }
-      }
+      // 1. Rewrite atribut href, src, action, data-src, data-href, poster
+      html = html.replace(
+        /(\b(?:href|src|action|data-src|data-href|data-lazy|data-original|data-url|poster)\s*=\s*)(['"])(.*?)\2/gi,
+        (_, attr, q, v) => `${attr}${q}${px(v)}${q}`
+      );
 
-      html = html.replace(/(\b(?:href|src|action)\s*=\s*)(['"])(.*?)\2/gi,
-        (_, a, q, v) => `${a}${q}${px(v)}${q}`);
+      // 2. Rewrite srcset
       html = html.replace(/\bsrcset\s*=\s*(['"])(.*?)\1/gi, (_, q, val) => {
-        const rewritten = val.replace(/(\S+)(\s*(?:\s+\d+[wx])?)/g, (m, u, rest) => px(u) + rest);
+        const rewritten = val.replace(/([^\s,][^\s,]*?)(\s+\d+[wx])?(?=\s*,|\s*$)/g, (m, u, desc) => {
+          return px(u) + (desc || "");
+        });
         return `srcset=${q}${rewritten}${q}`;
       });
+
+      // 3. Rewrite CSS dalam tag <style>
+      html = html.replace(/(<style[^>]*>)([\s\S]*?)(<\/style>)/gi, (_, open, css, close) => {
+        return open + rewriteCss(css) + close;
+      });
+
+      // 4. Rewrite inline style attribute
+      html = html.replace(/\bstyle\s*=\s*(['"])(.*?)\1/gi, (_, q, css) => {
+        return `style=${q}${rewriteCss(css)}${q}`;
+      });
+
+      // 5. Rewrite meta refresh
+      html = html.replace(
+        /(<meta[^>]+content\s*=\s*["']\d+;\s*url=)([^"'>]+)(["'])/gi,
+        (_, pre, u, q) => `${pre}${px(u)}${q}`
+      );
+
+      // 6. Hapus atribut yang bikin masalah
       html = html.replace(/\s*integrity\s*=\s*["'][^"']*["']/gi, "");
       html = html.replace(/\s*crossorigin\s*=\s*["'][^"']*["']/gi, "");
       html = html.replace(/<base[^>]*>/gi, "");
 
-      // Escape untuk JSON string
-      const safeOrig = JSON.stringify(orig);
-      const safeBase = JSON.stringify(base);
+      // 7. Inject script interceptor
+      const safeOrig = JSON.stringify(targetUrl);
+      const safeBase = JSON.stringify(targetBase);
+      const safeOrigin = JSON.stringify(targetOrigin);
 
       const script = `<script>
 (function(){
-var P='/api/proxy?url=';
-var O=${safeOrig};
-var B=${safeBase};
+var PROXY='/api/proxy?url=';
+var ORIG=${safeOrig};
+var BASE=${safeBase};
+var ORIGIN=${safeOrigin};
 
-// Fungsi buat absolute URL
+// Buat absolute URL — FIX UTAMA: pakai BASE bukan ORIGIN untuk relative path
 function abs(u){
-  if(!u)return u;
+  if(!u||typeof u!=='string')return u;
+  u=u.trim();
   try{
     if(u.startsWith('//'))return 'https:'+u;
-    if(u.startsWith('/'))return B+u;
+    if(u.startsWith('/'))return ORIGIN+u;
     if(u.startsWith('http'))return u;
-    return new URL(u,O).href;
+    return new URL(u,BASE).href; // ← kunci: direktori aktif, bukan hanya origin
   }catch(e){return u;}
 }
 
-// Fungsi proxy URL
 function px(u){
-  if(!u||/^(data:|javascript:|#|mailto:|tel:|blob:)/.test(u))return u;
-  if(u.startsWith(P))return u;
-  return P+encodeURIComponent(abs(u));
+  if(!u||/^(data:|javascript:|#|mailto:|tel:|blob:|about:)/.test(u))return u;
+  if(u.startsWith(PROXY))return u;
+  return PROXY+encodeURIComponent(abs(u));
 }
 
-// Kirim navigasi ke parent (index.html)
 function goto(u){
   try{parent.postMessage({t:'goto',u:u},'*');}catch(e){}
 }
@@ -132,23 +179,29 @@ function notify(u){
 }
 
 // Intercept fetch
-var oF=window.fetch;
+var oFetch=window.fetch;
 window.fetch=function(inp,ini){
-  var u=typeof inp==='string'?inp:(inp&&inp.url||'');
-  if(u&&!u.startsWith(P)&&(u.startsWith('http')||u.startsWith('//')))
-    return oF(P+encodeURIComponent(abs(u)),ini);
-  return oF(inp,ini);
+  var u=typeof inp==='string'?inp:(inp&&inp.url||String(inp));
+  if(u&&!u.startsWith(PROXY)&&(u.startsWith('http')||u.startsWith('//')||u.startsWith('/'))){
+    var proxied=PROXY+encodeURIComponent(abs(u));
+    if(typeof inp==='string') return oFetch(proxied,ini);
+    var newReq=new Request(proxied,inp);
+    return oFetch(newReq,ini);
+  }
+  return oFetch(inp,ini);
 };
 
 // Intercept XHR
-var oO=XMLHttpRequest.prototype.open;
+var oOpen=XMLHttpRequest.prototype.open;
 XMLHttpRequest.prototype.open=function(m,u){
-  if(u&&!u.startsWith(P)&&(u.startsWith('http')||u.startsWith('//')))
-    u=P+encodeURIComponent(abs(u));
-  return oO.apply(this,[m,u].concat(Array.prototype.slice.call(arguments,2)));
+  if(u&&typeof u==='string'&&!u.startsWith(PROXY)&&
+    (u.startsWith('http')||u.startsWith('//')||u.startsWith('/'))){
+    u=PROXY+encodeURIComponent(abs(u));
+  }
+  return oOpen.apply(this,[m,u].concat(Array.prototype.slice.call(arguments,2)));
 };
 
-// Intercept semua klik link — ini yang paling penting
+// Intercept klik link
 document.addEventListener('click',function(e){
   var el=e.target;
   while(el&&el.tagName!=='A')el=el.parentElement;
@@ -158,72 +211,75 @@ document.addEventListener('click',function(e){
   if(href==='#'||href.startsWith('#'))return;
   e.preventDefault();
   e.stopPropagation();
-  var a=abs(href);
-  goto(a); // minta parent load URL baru
+  goto(abs(href)); // kirim URL asli ke parent, parent yang wrap ke proxy
 },true);
 
 // Intercept form submit
 document.addEventListener('submit',function(e){
   var f=e.target;
-  var action=f.action||O;
+  var action=f.getAttribute('action')||ORIG;
   e.preventDefault();
   e.stopPropagation();
-  var params=new URLSearchParams(new FormData(f)).toString();
+  var method=(f.method||'get').toUpperCase();
   var a=abs(action);
-  if(params){var sep=a.includes('?')?'&':'?';a+=sep+params;}
-  goto(a);
+  if(method==='GET'){
+    var params=new URLSearchParams(new FormData(f)).toString();
+    if(params){var sep=a.includes('?')?'&':'?';a+=sep+params;}
+    goto(a);
+  } else {
+    // POST: kirim ke parent biar di-handle
+    var formData=new URLSearchParams(new FormData(f)).toString();
+    try{parent.postMessage({t:'post',u:a,d:formData},'*');}catch(ex){}
+  }
 },true);
 
-// Intercept pushState / replaceState (Google Search pakai ini)
+// Intercept pushState / replaceState
 try{
   var oPS=history.pushState.bind(history);
   var oRS=history.replaceState.bind(history);
   history.pushState=function(s,t,u){
-    var result=oPS(s,t,u);
-    if(u)notify(abs(u));
-    return result;
+    if(u){var a=abs(String(u));notify(a);return oPS(s,t,u);}
+    return oPS(s,t,u);
   };
   history.replaceState=function(s,t,u){
-    var result=oRS(s,t,u);
-    if(u)notify(abs(u));
-    return result;
+    if(u){var a=abs(String(u));notify(a);return oRS(s,t,u);}
+    return oRS(s,t,u);
   };
 }catch(e){}
 
-// Intercept window.location.href = "..." lewat MutationObserver pada navigasi
-// Serta intercept assign/replace
-(function(){
-  var nav=window.navigator;
-  // Wrap location setter
-  try{
-    var desc=Object.getOwnPropertyDescriptor(window,'location');
-    if(!desc||desc.configurable){
-      var _href=location.href;
-      setInterval(function(){
-        var cur=location.href;
-        if(cur!==_href){
-          _href=cur;
-          // Cek apakah URL sudah lewat proxy
-          if(!cur.startsWith(P)&&cur.startsWith('http')){
-            notify(cur);
-          }
-        }
-      },300);
+// Monitor location.href changes (SPA)
+var _lastHref=location.href;
+setInterval(function(){
+  var cur=location.href;
+  if(cur!==_lastHref){
+    _lastHref=cur;
+    if(!cur.startsWith(PROXY)&&(cur.startsWith('http')||cur.startsWith('/'))){
+      notify(abs(cur));
     }
-  }catch(e){}
-})();
+  }
+},500);
 
-notify(O);
+notify(ORIG);
 })();
 <\/script>`;
 
       html = html.replace(/<head([^>]*)>/i, `<head$1>${script}`);
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.status(status).send(html);
+
+    // ─── Proses CSS ──────────────────────────────────────────────────────
+    } else if (isCss) {
+      let css = await fetchRes.text();
+      css = rewriteCss(css);
+      res.setHeader("Content-Type", "text/css; charset=utf-8");
+      res.status(status).send(css);
+
+    // ─── Binary / lainnya ────────────────────────────────────────────────
     } else {
       const buf = Buffer.from(await fetchRes.arrayBuffer());
       res.status(status).send(buf);
     }
+
   } catch (err) {
     res.status(500).json({ error: "Proxy error", detail: err.message });
   }
