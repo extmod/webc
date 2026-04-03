@@ -24,6 +24,10 @@ export default async function handler(req, res) {
       ? targetUrl
       : targetUrl.substring(0, targetUrl.lastIndexOf("/") + 1);
 
+    // HOST absolut Vercel — agar redirect tidak nyasar ke domain situs tujuan
+    const HOST = `https://${req.headers.host}`;
+    const PROXY_BASE = `${HOST}/api/proxy?url=`;
+
     let body = undefined;
     if (!["GET", "HEAD"].includes(req.method)) {
       body = await new Promise((resolve) => {
@@ -54,7 +58,7 @@ export default async function handler(req, res) {
         if (loc.startsWith("//")) loc = "https:" + loc;
         else if (loc.startsWith("/")) loc = targetOrigin + loc;
         else if (!loc.startsWith("http")) loc = new URL(loc, targetUrl).href;
-        res.setHeader("Location", `/api/proxy?url=${encodeURIComponent(loc)}`);
+        res.setHeader("Location", `${PROXY_BASE}${encodeURIComponent(loc)}`);
         res.status(302).end();
         return;
       }
@@ -82,12 +86,12 @@ export default async function handler(req, res) {
       if (!u || typeof u !== "string") return u;
       u = u.trim();
       if (/^(data:|javascript:|#|mailto:|tel:|blob:|about:)/.test(u)) return u;
-      if (u.startsWith("/api/proxy")) return u;
+      if (u.startsWith(PROXY_BASE) || u.includes("/api/proxy?url=")) return u;
       try {
         if (u.startsWith("//")) u = "https:" + u;
         else if (u.startsWith("/")) u = targetOrigin + u;
-        else if (!u.startsWith("http")) u = new URL(u, targetBase).href; // ← FIX: pakai targetBase bukan targetOrigin
-        return `/api/proxy?url=${encodeURIComponent(u)}`;
+        else if (!u.startsWith("http")) u = new URL(u, targetBase).href;
+        return `${PROXY_BASE}${encodeURIComponent(u)}`;
       } catch {
         return u;
       }
@@ -145,15 +149,15 @@ export default async function handler(req, res) {
       const safeOrig = JSON.stringify(targetUrl);
       const safeBase = JSON.stringify(targetBase);
       const safeOrigin = JSON.stringify(targetOrigin);
+      const safeProxyBase = JSON.stringify(PROXY_BASE);
 
       const script = `<script>
 (function(){
-var PROXY='/api/proxy?url=';
+var PROXY=${safeProxyBase};
 var ORIG=${safeOrig};
 var BASE=${safeBase};
 var ORIGIN=${safeOrigin};
 
-// Buat absolute URL — FIX UTAMA: pakai BASE bukan ORIGIN untuk relative path
 function abs(u){
   if(!u||typeof u!=='string')return u;
   u=u.trim();
@@ -161,13 +165,13 @@ function abs(u){
     if(u.startsWith('//'))return 'https:'+u;
     if(u.startsWith('/'))return ORIGIN+u;
     if(u.startsWith('http'))return u;
-    return new URL(u,BASE).href; // ← kunci: direktori aktif, bukan hanya origin
+    return new URL(u,BASE).href;
   }catch(e){return u;}
 }
 
 function px(u){
   if(!u||/^(data:|javascript:|#|mailto:|tel:|blob:|about:)/.test(u))return u;
-  if(u.startsWith(PROXY))return u;
+  if(u.startsWith(PROXY)||u.includes('/api/proxy?url='))return u;
   return PROXY+encodeURIComponent(abs(u));
 }
 
@@ -182,7 +186,7 @@ function notify(u){
 var oFetch=window.fetch;
 window.fetch=function(inp,ini){
   var u=typeof inp==='string'?inp:(inp&&inp.url||String(inp));
-  if(u&&!u.startsWith(PROXY)&&(u.startsWith('http')||u.startsWith('//')||u.startsWith('/'))){
+  if(u&&!u.includes('/api/proxy?url=')&&(u.startsWith('http')||u.startsWith('//')||u.startsWith('/'))){
     var proxied=PROXY+encodeURIComponent(abs(u));
     if(typeof inp==='string') return oFetch(proxied,ini);
     var newReq=new Request(proxied,inp);
@@ -194,7 +198,7 @@ window.fetch=function(inp,ini){
 // Intercept XHR
 var oOpen=XMLHttpRequest.prototype.open;
 XMLHttpRequest.prototype.open=function(m,u){
-  if(u&&typeof u==='string'&&!u.startsWith(PROXY)&&
+  if(u&&typeof u==='string'&&!u.includes('/api/proxy?url=')&&
     (u.startsWith('http')||u.startsWith('//')||u.startsWith('/'))){
     u=PROXY+encodeURIComponent(abs(u));
   }
@@ -211,7 +215,7 @@ document.addEventListener('click',function(e){
   if(href==='#'||href.startsWith('#'))return;
   e.preventDefault();
   e.stopPropagation();
-  goto(abs(href)); // kirim URL asli ke parent, parent yang wrap ke proxy
+  goto(abs(href));
 },true);
 
 // Intercept form submit
@@ -227,7 +231,6 @@ document.addEventListener('submit',function(e){
     if(params){var sep=a.includes('?')?'&':'?';a+=sep+params;}
     goto(a);
   } else {
-    // POST: kirim ke parent biar di-handle
     var formData=new URLSearchParams(new FormData(f)).toString();
     try{parent.postMessage({t:'post',u:a,d:formData},'*');}catch(ex){}
   }
@@ -253,7 +256,7 @@ setInterval(function(){
   var cur=location.href;
   if(cur!==_lastHref){
     _lastHref=cur;
-    if(!cur.startsWith(PROXY)&&(cur.startsWith('http')||cur.startsWith('/'))){
+    if(!cur.includes('/api/proxy?url=')&&(cur.startsWith('http')||cur.startsWith('/'))){
       notify(abs(cur));
     }
   }
