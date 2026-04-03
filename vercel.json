@@ -1,5 +1,7 @@
 {
-  "rewrites": [
-    { "source": "/api/proxy", "destination": "/api/proxy" }
-  ]
+  "functions": {
+    "api/proxy.js": {
+      "memory": 1024
+    }
+  }
 }
