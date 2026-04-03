@@ -17,7 +17,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // HOST absolut Vercel — agar semua URL proxy tidak nyasar ke domain situs tujuan
     const HOST = `https://${req.headers.host}`;
     const PROXY_BASE = `${HOST}/api/proxy?url=`;
 
@@ -30,26 +29,23 @@ export default async function handler(req, res) {
       });
     }
 
-    // ── Follow redirect secara manual (loop) ──────────────────────────────
-    // Vercel runtime kadang tidak support redirect:"manual" dengan benar,
-    // sehingga redirect di-follow langsung tanpa lewat kode kita.
-    // Solusi: kita follow sendiri sampai dapat response non-redirect.
+    // ── Follow redirect manual ────────────────────────────────────────────
     let fetchRes;
     let currentUrl = targetUrl;
     let currentMethod = req.method;
     let currentBody = body;
-    const MAX_REDIRECTS = 8;
 
-    for (let i = 0; i <= MAX_REDIRECTS; i++) {
+    for (let i = 0; i <= 8; i++) {
       const parsedCurrent = new URL(currentUrl);
       fetchRes = await fetch(currentUrl, {
         method: currentMethod,
         headers: {
-          "User-Agent": "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36",
-          "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
           "Accept-Language": "en-US,en;q=0.9",
           "Accept-Encoding": "identity",
           "Referer": parsedCurrent.origin,
+          "Origin": parsedCurrent.origin,
           ...(currentBody ? { "Content-Type": req.headers["content-type"] || "application/x-www-form-urlencoded" } : {}),
         },
         body: currentBody,
@@ -59,19 +55,16 @@ export default async function handler(req, res) {
       if ([301, 302, 303, 307, 308].includes(fetchRes.status)) {
         let loc = fetchRes.headers.get("location") || "";
         if (!loc) break;
-        // Resolve URL redirect ke absolute
         if (loc.startsWith("//")) loc = "https:" + loc;
         else if (loc.startsWith("/")) loc = parsedCurrent.origin + loc;
         else if (!loc.startsWith("http")) loc = new URL(loc, currentUrl).href;
-        // 303 ubah ke GET
         if (fetchRes.status === 303) { currentMethod = "GET"; currentBody = undefined; }
         currentUrl = loc;
         continue;
       }
-      break; // bukan redirect, selesai
+      break;
     }
 
-    // currentUrl sekarang adalah URL final setelah semua redirect
     const parsedFinal = new URL(currentUrl);
     const finalOrigin = parsedFinal.origin;
     const finalBase = currentUrl.endsWith("/")
@@ -81,8 +74,8 @@ export default async function handler(req, res) {
     const ct = fetchRes.headers.get("content-type") || "";
     const isHtml = ct.includes("text/html");
     const isCss = ct.includes("text/css");
+    const isJs = ct.includes("javascript");
 
-    // Skip headers yang bermasalah
     const skipHeaders = new Set([
       "content-encoding", "transfer-encoding", "connection", "keep-alive",
       "upgrade", "x-frame-options", "content-security-policy",
@@ -95,7 +88,7 @@ export default async function handler(req, res) {
 
     const status = (fetchRes.status >= 200 && fetchRes.status <= 599) ? fetchRes.status : 200;
 
-    // ── Fungsi rewrite URL ────────────────────────────────────────────────
+    // ── px(): rewrite URL ke proxy ────────────────────────────────────────
     function px(u) {
       if (!u || typeof u !== "string") return u;
       u = u.trim();
@@ -106,58 +99,62 @@ export default async function handler(req, res) {
         else if (u.startsWith("/")) u = finalOrigin + u;
         else if (!u.startsWith("http")) u = new URL(u, finalBase).href;
         return `${PROXY_BASE}${encodeURIComponent(u)}`;
-      } catch {
-        return u;
-      }
+      } catch { return u; }
     }
 
-    // ── Rewrite CSS content ───────────────────────────────────────────────
     function rewriteCss(css) {
-      return css.replace(/url\(\s*(['"]?)(.*?)\1\s*\)/gi, (_, q, u) => {
-        return `url(${q}${px(u)}${q})`;
-      });
+      return css.replace(/url\(\s*(['"]?)(.*?)\1\s*\)/gi, (_, q, u) => `url(${q}${px(u)}${q})`);
     }
 
-    // ── Proses HTML ───────────────────────────────────────────────────────
+    // ── Rewrite JS: tangkap assignment ke window.location ─────────────────
+    function rewriteJs(js) {
+      // window.location.href = "..." atau location.href = "..."
+      js = js.replace(
+        /((?:window\.)?location(?:\.href)?\s*=\s*)(['"`])(https?:\/\/[^'"`]+)\2/g,
+        (_, pre, q, u) => `${pre}${q}${px(u)}${q}`
+      );
+      return js;
+    }
+
     if (isHtml) {
       let html = await fetchRes.text();
 
-      // 1. Rewrite href, src, action, data-src, data-href, poster, dll
+      // 1. Atribut href, src, action, data-*, poster
       html = html.replace(
-        /(\b(?:href|src|action|data-src|data-href|data-lazy|data-original|data-url|poster)\s*=\s*)(['"])(.*?)\2/gi,
+        /(\b(?:href|src|action|data-src|data-href|data-lazy|data-original|data-url|data-video-url|poster|data-hls-url|data-mp4-url)\s*=\s*)(['"])(.*?)\2/gi,
         (_, attr, q, v) => `${attr}${q}${px(v)}${q}`
       );
 
-      // 2. Rewrite srcset
+      // 2. srcset
       html = html.replace(/\bsrcset\s*=\s*(['"])(.*?)\1/gi, (_, q, val) => {
-        const rewritten = val.replace(/([^\s,][^\s,]*?)(\s+\d+[wx])?(?=\s*,|\s*$)/g, (m, u, desc) => {
-          return px(u) + (desc || "");
-        });
-        return `srcset=${q}${rewritten}${q}`;
+        const rw = val.replace(/([^\s,][^\s,]*?)(\s+\d+[wx])?(?=\s*,|\s*$)/g, (m, u, d) => px(u) + (d || ""));
+        return `srcset=${q}${rw}${q}`;
       });
 
-      // 3. Rewrite CSS dalam <style>
-      html = html.replace(/(<style[^>]*>)([\s\S]*?)(<\/style>)/gi, (_, open, css, close) => {
-        return open + rewriteCss(css) + close;
-      });
+      // 3. <style>
+      html = html.replace(/(<style[^>]*>)([\s\S]*?)(<\/style>)/gi, (_, o, css, c) => o + rewriteCss(css) + c);
 
-      // 4. Rewrite inline style attribute
-      html = html.replace(/\bstyle\s*=\s*(['"])(.*?)\1/gi, (_, q, css) => {
-        return `style=${q}${rewriteCss(css)}${q}`;
-      });
+      // 4. inline style
+      html = html.replace(/\bstyle\s*=\s*(['"])(.*?)\1/gi, (_, q, css) => `style=${q}${rewriteCss(css)}${q}`);
 
-      // 5. Rewrite meta refresh
+      // 5. meta refresh
       html = html.replace(
         /(<meta[^>]+content\s*=\s*["']\d+;\s*url=)([^"'>]+)(["'])/gi,
         (_, pre, u, q) => `${pre}${px(u)}${q}`
       );
 
-      // 6. Hapus atribut yang bikin masalah
+      // 6. Rewrite JS inline (location assignments)
+      html = html.replace(/(<script[^>]*>)([\s\S]*?)(<\/script>)/gi, (_, o, js, c) => {
+        if (o.includes("src=")) return _ ; // skip external scripts, handled via src rewrite
+        return o + rewriteJs(js) + c;
+      });
+
+      // 7. Bersihkan
       html = html.replace(/\s*integrity\s*=\s*["'][^"']*["']/gi, "");
       html = html.replace(/\s*crossorigin\s*=\s*["'][^"']*["']/gi, "");
       html = html.replace(/<base[^>]*>/gi, "");
 
-      // 7. Inject script interceptor
+      // 8. Inject interceptor script
       const safeOrig   = JSON.stringify(currentUrl);
       const safeBase   = JSON.stringify(finalBase);
       const safeOrigin = JSON.stringify(finalOrigin);
@@ -241,6 +238,15 @@ document.addEventListener('submit',function(e){
   }
 },true);
 
+// Intercept window.location assignments
+try{
+  var locProto=window.Location.prototype;
+  var origAssign=locProto.assign;
+  var origReplace=locProto.replace;
+  locProto.assign=function(u){goto(abs(u));};
+  locProto.replace=function(u){goto(abs(u));};
+}catch(e){}
+
 // Intercept pushState/replaceState
 try{
   var oPS=history.pushState.bind(history);
@@ -249,16 +255,16 @@ try{
   history.replaceState=function(s,t,u){if(u){notify(abs(String(u)));} return oRS(s,t,u);};
 }catch(e){}
 
-// Monitor location changes (SPA)
+// Monitor location changes (SPA / JS redirect)
 var _last=location.href;
 setInterval(function(){
   var cur=location.href;
   if(cur!==_last){
     _last=cur;
     if(!cur.includes('/api/proxy?url=')&&(cur.startsWith('http')||cur.startsWith('/')))
-      notify(abs(cur));
+      goto(abs(cur));
   }
-},500);
+},300);
 
 notify(ORIG);
 })();
@@ -268,14 +274,18 @@ notify(ORIG);
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.status(status).send(html);
 
-    // ── Proses CSS ────────────────────────────────────────────────────────
     } else if (isCss) {
-      let css = await fetchRes.text();
+      const css = await fetchRes.text();
       res.setHeader("Content-Type", "text/css; charset=utf-8");
       res.status(status).send(rewriteCss(css));
 
-    // ── Binary / lainnya ──────────────────────────────────────────────────
+    } else if (isJs) {
+      const js = await fetchRes.text();
+      res.setHeader("Content-Type", "application/javascript; charset=utf-8");
+      res.status(status).send(rewriteJs(js));
+
     } else {
+      // Binary: gambar, video, font, dll — stream langsung
       const buf = Buffer.from(await fetchRes.arrayBuffer());
       res.status(status).send(buf);
     }
